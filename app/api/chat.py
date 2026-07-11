@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import secrets
 import sqlite3
@@ -25,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Self-destruction: wipe all chat memory every 15 minutes
-MEMORY_WIPE_INTERVAL_SEC = 15 * 60
+# Conversation memory: per-user threads are kept until /clear-memory is called
+# or they have been inactive for config.MEMORY_TTL_HOURS (0 = never auto-wipe).
 
 # Message appended to every bot reply so users know the content is AI-generated
 SOURCE_FOOTER = "\n\n⚠️ Attention : ce texte est généré par IA. Vérifiez les informations avant toute décision ou action."
@@ -185,7 +186,7 @@ def clear_all_chat_memory() -> None:
             import psycopg
 
             with psycopg.connect(config.DATABASE_URL) as conn:
-                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints", "thread_activity"):
                     try:
                         conn.execute(f"DELETE FROM {table}")
                     except psycopg.Error:
@@ -201,6 +202,10 @@ def clear_all_chat_memory() -> None:
         with sqlite3.connect(str(CHAT_MEMORY_DB)) as conn:
             conn.execute("DELETE FROM writes")
             conn.execute("DELETE FROM checkpoints")
+            try:
+                conn.execute("DELETE FROM thread_activity")
+            except sqlite3.OperationalError:
+                pass  # table may not exist yet
             conn.commit()
         logger.info("Chat memory wiped (all threads).")
     except sqlite3.OperationalError as e:
@@ -209,6 +214,82 @@ def clear_all_chat_memory() -> None:
         logger.warning("Chat memory wipe failed (tables may not exist yet): %s", e)
     except Exception as e:
         logger.warning("Chat memory wipe failed: %s", e)
+
+
+# --- Per-thread activity tracking + TTL-based cleanup -----------------------
+# A tiny table in the checkpoint DB records the last activity per thread_id.
+# cleanup_stale_threads() wipes threads inactive for > MEMORY_TTL_HOURS.
+
+def _activity_connect():
+    """Raw connection to the checkpoint DB, in autocommit mode (SQLite or Postgres)."""
+    if config.DATABASE_URL:
+        import psycopg
+
+        return psycopg.connect(config.DATABASE_URL, autocommit=True)
+    CHAT_MEMORY_DB.parent.mkdir(parents=True, exist_ok=True)
+    return sqlite3.connect(str(CHAT_MEMORY_DB), timeout=30.0, isolation_level=None)
+
+
+def _placeholder() -> str:
+    """SQL parameter placeholder for the active backend (psycopg vs sqlite3)."""
+    return "%s" if config.DATABASE_URL else "?"
+
+
+def _ensure_activity_table(conn) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS thread_activity "
+        "(thread_id TEXT PRIMARY KEY, last_seen DOUBLE PRECISION)"
+    )
+
+
+def touch_thread_activity(thread_id: str | None) -> None:
+    """Record activity for a conversation thread (best-effort, never raises)."""
+    if not thread_id:
+        return
+    try:
+        with contextlib.closing(_activity_connect()) as conn:
+            _ensure_activity_table(conn)
+            ph = _placeholder()
+            conn.execute(
+                f"INSERT INTO thread_activity (thread_id, last_seen) VALUES ({ph}, {ph}) "
+                "ON CONFLICT(thread_id) DO UPDATE SET last_seen = excluded.last_seen",
+                (thread_id, time.time()),
+            )
+    except Exception as e:
+        logger.warning("touch_thread_activity failed: %s", e)
+
+
+def cleanup_stale_threads() -> None:
+    """Delete conversation threads inactive for more than MEMORY_TTL_HOURS.
+
+    No-op when MEMORY_TTL_HOURS <= 0 (memory kept until manual /clear-memory).
+    """
+    ttl = config.MEMORY_TTL_HOURS
+    if ttl <= 0:
+        return
+    cutoff = time.time() - ttl * 3600
+    try:
+        with contextlib.closing(_activity_connect()) as conn:
+            _ensure_activity_table(conn)
+            ph = _placeholder()
+            rows = conn.execute(
+                f"SELECT thread_id FROM thread_activity WHERE last_seen < {ph}", (cutoff,)
+            ).fetchall()
+            stale = [r[0] for r in rows]
+            for tid in stale:
+                try:
+                    _get_checkpointer().delete_thread(tid)
+                except Exception as e:
+                    logger.warning("delete_thread(%s) failed: %s", tid, e)
+            if stale:
+                conn.execute(
+                    f"DELETE FROM thread_activity WHERE last_seen < {ph}", (cutoff,)
+                )
+                logger.info(
+                    "Cleaned up %d stale conversation(s) (TTL %.1fh).", len(stale), ttl
+                )
+    except Exception as e:
+        logger.warning("cleanup_stale_threads failed: %s", e)
 
 
 def _quota_active(user_key: str) -> bool:
@@ -234,6 +315,7 @@ def chat(req: ChatRequest) -> ChatResponse | ChatError:
         )
     counted = False
     try:
+        touch_thread_activity(req.thread_id)
         # Daily free quota: count the request once it has a worker slot, so
         # rate-limited/"busy" rejections never consume quota. Atomic
         # increment-then-check keeps concurrent requests from overshooting.
@@ -303,27 +385,32 @@ def health():
     return {"status": "ok"}
 
 
-async def _memory_wipe_loop() -> None:
-    """Background task: every MEMORY_WIPE_INTERVAL_SEC, wipe all chat memory."""
+async def _memory_cleanup_loop() -> None:
+    """Background task: periodically wipe threads inactive for > MEMORY_TTL_HOURS."""
     while True:
-        await asyncio.sleep(MEMORY_WIPE_INTERVAL_SEC)
+        await asyncio.sleep(max(60, config.MEMORY_CLEANUP_INTERVAL_SEC))
         try:
-            await asyncio.to_thread(clear_all_chat_memory)
+            await asyncio.to_thread(cleanup_stale_threads)
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.warning("Memory wipe loop error: %s", e)
+            logger.warning("Memory cleanup loop error: %s", e)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    task = asyncio.create_task(_memory_wipe_loop())
+    task = (
+        asyncio.create_task(_memory_cleanup_loop())
+        if config.MEMORY_TTL_HOURS > 0
+        else None
+    )
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="BRVM Chat API", version="1.0", lifespan=_lifespan)

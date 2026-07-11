@@ -144,7 +144,7 @@ RealTimeStock/
    - `DAILY_FREE_QUOTA` (default `30`) — free requests per user per day; over-quota users get a friendly "come back tomorrow" reply. Failed requests are refunded; `QUOTA_EXEMPT_IDS` (comma-separated user ids) bypass the limit. Persisted in SQLite, so restarts don't reset it.
    - `DATABASE_URL` — user data (portfolio, tracking, targets, quota) and chat checkpoints. Empty = local SQLite files in `app/data/` (zero config). Set `postgresql://user:password@host:5432/dbname` for PostgreSQL in production (docker compose wires this automatically via `POSTGRES_PASSWORD`).
    - `RECURSION_LIMIT` (default `100`) — max agent steps before a partial answer is returned.
-   - Chat memory: checkpoints live in `app/data/chat_memory.db`, are condensed to the last user/answer pairs per thread, and the API wipes all chat memory every 15 minutes (privacy by design). `/clearmemory` clears one user's thread on demand.
+   - Chat memory: checkpoints live in `app/data/chat_memory.db`, condensed to the last user/answer pairs per thread (`MEMORY_MAX_MESSAGES`, default `20`). Conversations persist across turns so follow-up questions work; threads inactive for more than `MEMORY_TTL_HOURS` (default `24`, `0` = never) are wiped automatically (`MEMORY_CLEANUP_INTERVAL_SEC`, default `3600`). `/clearmemory` clears one user's thread on demand.
 
    Security notes: portfolio/tracking/alert tools never receive a user id from the model — the identity is injected server-side from the verified chat context, so one user cannot access another user's data. Every reply carries an AI-generated disclaimer. User databases (`app/data/*.db`) are git-ignored and must not be committed.
 
@@ -161,6 +161,7 @@ RealTimeStock/
    python tests/test_whatsapp_webhook.py    # WhatsApp channel: webhook, dedup, chunking (needs full deps)
    python tests/test_whatsapp_evolution.py  # WhatsApp via Evolution API: webhook, auth, audio (needs full deps)
    python tests/test_graph_e2e.py           # full graph with fake LLM (needs full deps)
+   python tests/test_conversation_memory.py # multi-turn memory: clarification persistence, NLU context, TTL cleanup
    python tests/test_postgres_backend.py    # SQL translation always; full PG run when TEST_DATABASE_URL is set
    ```
 

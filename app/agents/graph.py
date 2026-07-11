@@ -34,7 +34,9 @@ from app.agents.prediction_agent import create_prediction_agent, get_prediction_
 from app.agents.sgi_agent import create_sgi_agent, get_sgi_agent_system
 from app.agents.company_details_agent import create_company_details_agent, get_company_details_agent_system
 
-MEMORY_MAX_MESSAGES = 10  # Keep only last 10 messages (user + final AI pairs)
+# Keep only the last N condensed messages (user + final AI pairs) per thread.
+# Configurable via MEMORY_MAX_MESSAGES env var (default 20 = 10 exchanges).
+MEMORY_MAX_MESSAGES = getattr(config, "MEMORY_MAX_MESSAGES", 20)
 
 SUPERVISOR_SYSTEM_TEMPLATE = """BRVM router. Output one label only. {time_line}
 
@@ -125,6 +127,7 @@ def _condense_to_user_final_pairs(messages: list) -> list:
     reply sent to the user (last AIMessage before next HumanMessage, excluding NLU).
     """
     out: list = []
+    max_messages = getattr(config, "MEMORY_MAX_MESSAGES", MEMORY_MAX_MESSAGES)
     i = 0
     while i < len(messages):
         if not isinstance(messages[i], HumanMessage):
@@ -145,7 +148,7 @@ def _condense_to_user_final_pairs(messages: list) -> list:
             out.append(user_msg)
             out.append(final_ai)
         i = j if j > i else i + 1
-    return out[-MEMORY_MAX_MESSAGES:]
+    return out[-max_messages:]
 
 
 def _build_supervisor_node(model: str):
@@ -500,12 +503,24 @@ def run_agent(
         except Exception as upd_err:
             logger.warning("Could not revert messages on failure: %s", upd_err)
 
+    def _persist_clarification(clarification: str) -> None:
+        """Save the clarifying exchange so the next turn has full context."""
+        try:
+            history = list(condensed) + [
+                HumanMessage(content=query),
+                AIMessage(content=clarification),
+            ]
+            max_messages = getattr(config, "MEMORY_MAX_MESSAGES", MEMORY_MAX_MESSAGES)
+            graph.update_state(run_config, {"messages": history[-max_messages:]})
+        except Exception as upd_err:
+            logger.warning("Could not persist clarification turn: %s", upd_err)
+
     last_error: BaseException | None = None
     for attempt in range(3):
         try:
             result = graph.invoke(initial, config=run_config)
             if result.get("clarification"):
-                _revert_messages()
+                _persist_clarification(result["clarification"])
                 return result
             # Success: store only [user, final_ai, ...], last 10
             new_condensed = _condense_to_user_final_pairs(result.get("messages") or [])
