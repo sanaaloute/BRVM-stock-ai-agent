@@ -28,6 +28,7 @@ certifi==2026.2.25
 
 # Telegram bot (job-queue for price target alerts)
 python-telegram-bot[job-queue]==22.8
-# Voice to text (optional: install ffmpeg for ogg/mp3 support)
+# Voice to text: local whisper (primary); Google Speech fallback needs ffmpeg for ogg/mp3
+faster-whisper==1.2.1
 SpeechRecognition==3.17.0
 pydub==0.25.1

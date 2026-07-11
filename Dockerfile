@@ -20,8 +20,15 @@ COPY app app/
 RUN mkdir -p /app/app/data/series
 
 # ffmpeg is required to convert Telegram/WhatsApp voice notes (OGG/OPUS) to WAV
-# for speech recognition (pydub shells out to ffmpeg/ffprobe).
+# for the Google Speech fallback (pydub shells out to ffmpeg/ffprobe).
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Pre-download the whisper model (voice-to-text) so the first voice note is fast
+# and the container needs no Hugging Face access at runtime. Bakes ~250MB (small,
+# int8) into the image. Override with: docker compose build --build-arg WHISPER_MODEL=base
+ARG WHISPER_MODEL=small
+ENV WHISPER_MODEL=${WHISPER_MODEL}
+RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

@@ -196,6 +196,16 @@ OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "2m").strip() or "2m"
 
 
 
+# Voice notes: local faster-whisper transcription (primary; Google Speech fallback).
+
+# small int8 ~250MB download, ~1GB RAM peak, good French accuracy on CPU.
+
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip() or "small"
+
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
+
+
+
 # Groq (https://console.groq.com)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip() or None
