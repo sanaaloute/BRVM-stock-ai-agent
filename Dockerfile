@@ -19,8 +19,9 @@ COPY app app/
 # Persisted at runtime via volume; ensure dir exists
 RUN mkdir -p /app/app/data/series
 
-# Optional: install ffmpeg for voice OGG→WAV (uncomment if you need voice messages in Telegram)
-# RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg is required to convert Telegram/WhatsApp voice notes (OGG/OPUS) to WAV
+# for speech recognition (pydub shells out to ffmpeg/ffprobe).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
