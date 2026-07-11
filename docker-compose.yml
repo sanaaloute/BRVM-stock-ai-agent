@@ -74,10 +74,16 @@ services:
   # AUTHENTICATION_API_KEY is YOUR chosen secret — set EVOLUTION_API_KEY in .env.
   evolution:
     # Official image (namespace moved from atendai/ to evoapicloud/ in v2.3.0).
-    # `homolog` is the actively maintained tag; versioned tags are no longer
-    # published. Note it is a moving tag — `docker compose pull evolution`
-    # to upgrade.
-    image: evoapicloud/evolution-api:homolog
+    # PINNED to v2.3.7 on purpose: v2.4.0 (and the moving `homolog` tag) has a
+    # confirmed upstream bug where POST /instance/create always fails with a
+    # `Setting_instanceId_fkey` FK violation on fresh installs (instanceName is
+    # stripped by a sanitization guard before instance.create — see
+    # evolution-foundation/evolution-api#2631, fix PR #2608 unmerged). v2.4.0
+    # also introduced mandatory license activation (free, one-time, via the
+    # manager UI); v2.3.7 needs no activation. Revisit `homolog` once #2631 is
+    # fixed upstream — note it then requires the license step documented in
+    # .env.example (EVOLUTION_OPERATOR_EMAIL).
+    image: evoapicloud/evolution-api:v2.3.7
     environment:
       - SERVER_PORT=8080
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-change-me}
@@ -94,6 +100,9 @@ services:
       - CACHE_LOCAL_ENABLED=true
       - LOG_LEVEL=ERROR,WARN,INFO
       - DEL_INSTANCE=false
+      # Optional (only relevant on v2.4.0+ images): headless license
+      # auto-activation after a first manual registration. Empty = skipped.
+      - EVOLUTION_OPERATOR_EMAIL=${EVOLUTION_OPERATOR_EMAIL:-}
     # Bound to localhost only: the bot reaches Evolution over the compose network
     # (http://evolution:8080), and admin access (QR pairing, webhook setup) goes
     # through an SSH tunnel — never expose this port in the EC2 security group.
