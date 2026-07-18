@@ -24,3 +24,6 @@ app/data/palmares_cache.json
 app/data/sgi_brvm.json
 debug-ce8ad8.log
 app/data/series/*.csv
+
+# Tests
+tests/
