@@ -4,6 +4,8 @@ import sys
 
 import uvicorn
 
+from config import API_PORT
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -14,7 +16,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.api.chat:app",
         host="0.0.0.0",
-        port=8000,
+        port=API_PORT,
         reload=False,
     )
     sys.exit(0)

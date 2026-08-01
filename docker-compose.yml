@@ -35,8 +35,11 @@ services:
       - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:-brvm}@db:5432/brvm
       # Inside the compose network the bot reaches Evolution by service name.
       - EVOLUTION_URL=http://evolution:8080
+      # In-container port stays 8000; API_PORT in .env only changes the
+      # published host port below.
+      - API_PORT=8000
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     volumes:
       - bot_data:/app/app/data
     healthcheck:

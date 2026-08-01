@@ -40,7 +40,13 @@ BRVM_ANNOUNCEMENTS_URL = "https://www.brvm.org/fr/emetteurs/type-annonces/convoc
 
 
 
-BRVM_API_URL = os.getenv("BRVM_API_URL", "http://localhost:8000").rstrip("/")
+# Port the Chat API (uvicorn) listens on. Change when 8000 is taken by another service.
+
+API_PORT = int(os.getenv("API_PORT", "8000").strip() or "8000")
+
+
+
+BRVM_API_URL = os.getenv("BRVM_API_URL", f"http://localhost:{API_PORT}").rstrip("/")
 
 # Set BRVM_VERIFY_SSL=0 or false to skip SSL verification for brvm.org (e.g. certificate chain issues)
 
