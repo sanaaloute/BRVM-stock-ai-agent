@@ -3,7 +3,7 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
 
-WorkerName = Literal["scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details"]
+WorkerName = Literal["scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor"]
 NextWorker = WorkerName | Literal["FINISH"]
 
 
@@ -15,6 +15,9 @@ class AgentState(TypedDict, total=False):
     """List of workers to run. When non-empty, used instead of next."""
     multi_parallel: bool
     """If True, run multi_workers in parallel; else sequential."""
+    last_worker: str | None
+    """Structural marker set by worker nodes ("multi" for the multi_worker); the
+    supervisor FINISHes without an LLM call when it is set, then clears it."""
     image_path: str | None
     structured_data: dict[str, Any] | None
     clarification: str | None

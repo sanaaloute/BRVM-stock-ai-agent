@@ -12,6 +12,15 @@ DAYS="${SGI_REFRESH_DAYS:-7}"
 
 mkdir -p "$DATA_DIR"
 
+# Database schema migrations (Alembic): adopt/create tables before boot.
+# Unlike the data fetches below, a schema failure MUST block startup.
+echo "[entrypoint] Running database migrations..."
+if command -v flock >/dev/null 2>&1; then
+  flock "$DATA_DIR/.migrate.lock" python run_migrations.py || exit 1
+else
+  python run_migrations.py || exit 1
+fi
+
 stale=0
 if [ ! -s "$SGI_JSON" ]; then
   stale=1
@@ -28,6 +37,30 @@ if [ "$stale" = "1" ]; then
   else
     python run_sgi_fetch.py \
       || echo "[entrypoint] WARNING: SGI fetch failed (non-fatal); SGI answers may be limited."
+  fi
+fi
+
+# Company details bootstrap: refresh $DATA_DIR/company_details/ when empty or
+# holding files older than COMPANY_DETAILS_REFRESH_DAYS (default 7). The fetch
+# script skips fresh files itself. Best effort, never blocks startup.
+CD_DIR="$DATA_DIR/company_details"
+CD_DAYS="${COMPANY_DETAILS_REFRESH_DAYS:-7}"
+
+cd_stale=0
+if [ ! -d "$CD_DIR" ] || [ -z "$(ls -A "$CD_DIR" 2>/dev/null)" ]; then
+  cd_stale=1
+elif find "$CD_DIR" -type f -mtime +"$CD_DAYS" 2>/dev/null | grep -q .; then
+  cd_stale=1
+fi
+
+if [ "$cd_stale" = "1" ]; then
+  echo "[entrypoint] company_details missing or older than ${CD_DAYS}d - fetching (best effort)..."
+  if command -v flock >/dev/null 2>&1; then
+    flock "$DATA_DIR/.company_details.lock" python run_company_details_fetch.py \
+      || echo "[entrypoint] WARNING: company details fetch failed (non-fatal)."
+  else
+    python run_company_details_fetch.py \
+      || echo "[entrypoint] WARNING: company details fetch failed (non-fatal)."
   fi
 fi
 

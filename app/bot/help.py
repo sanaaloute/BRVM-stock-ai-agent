@@ -18,6 +18,9 @@ Portefeuille et alertes (vos données personnelles) :
 • Portefeuille : « Affiche mon portefeuille » / « Ajoute NTLC à mon portefeuille : acheté à 50000 le 2025-01-15 » / « Retire NTLC de mon portefeuille » / « Évolution de mon portefeuille »
 • Suivi : « Ajoute NTLC à ma liste de suivi » / « Qu'est-ce que je suis ? » / « Retire NTLC du suivi »
 • Alertes de prix : « Préviens-moi quand NTLC atteint 55000 » / « Mes alertes de prix » / « Supprime l'alerte pour NTLC »
+• Résumé marché (digest) : /digest jour (chaque jour de bourse) / /digest semaine (le vendredi) / /digest off
+
+(Portefeuille, suivi, alertes et digest : disponibles sur Telegram uniquement — non encore disponible sur WhatsApp.)
 
 • Effacer la mémoire : envoyez /clearmemory pour supprimer la mémoire de la conversation et repartir à zéro.
 

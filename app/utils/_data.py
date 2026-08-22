@@ -5,7 +5,7 @@ import csv
 import logging
 import re
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,20 @@ MAX_AGE_DAYS = 1  # CSV considered stale if last date is older than this
 _FAILURE_ALERT_THRESHOLD = 3
 _consecutive_failures: dict[str, int] = {}
 _failures_lock = threading.Lock()
+
+# One refresh per cache key at a time: on TTL expiry, concurrent callers serve
+# the current snapshot (stale-while-revalidate) instead of stampeding the source.
+_refresh_locks: dict[str, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+
+
+def _get_refresh_lock(key: str) -> threading.Lock:
+    with _refresh_locks_guard:
+        lock = _refresh_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _refresh_locks[key] = lock
+        return lock
 
 _FRENCH_MONTHS = {
     "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5,
@@ -79,30 +93,56 @@ def fetch_palmares(period: str = "veille", progression: str = "tout", *, force_r
         cached = cache.get(key)
         if cached is not None:
             return cached
-    stocks: list[dict[str, Any]] = []
-    result: dict[str, Any] = {}
+        # BRVM trades Mon–Fri: on Saturday/Sunday serve the cached snapshot
+        # without re-scraping. Abidjan is GMT year-round (no DST), so the UTC
+        # weekday is the market weekday.
+        if datetime.now(timezone.utc).weekday() >= 5:
+            stale = cache.get_stale(key)
+            if stale is not None:
+                logger.info("Serving cached palmarès (%s): BRVM closed (weekend)", key)
+                return stale
+    lock = _get_refresh_lock(key)
+    if not lock.acquire(blocking=False):
+        # A refresh is already in flight: serve the existing snapshot immediately.
+        stale = cache.get_stale(key)
+        if stale is not None:
+            logger.debug("Palmarès refresh in flight (%s): serving current snapshot", key)
+            return stale
+        # Nothing cached yet (first run): wait for the in-flight refresh to finish.
+        with lock:
+            return cache.get(key) or cache.get_stale(key) or []
     try:
-        scraper = RichBourseScraper(period=period, progression=progression)
-        result = scraper.scrape() or {}
-        if not result.get("error"):
-            stocks = result.get("stocks") or []
-    except Exception as e:
-        logger.warning("Palmarès scrape raised (%s): %s", key, e)
-    if stocks:
-        _note_refresh_success(key)
-        data_date = _parse_french_date(result.get("date") or "")
-        if data_date:
-            age_days = (date.today() - data_date).days
-            if age_days > 4:
-                logger.warning("Palmarès (%s) data is %d days old (%s)", key, age_days, result.get("date"))
-        cache.set(key, stocks)
-        return stocks
-    _note_refresh_failure(key)
-    stale = cache.get_stale(key)
-    if stale is not None:
-        logger.info("Serving stale palmarès (%s): refresh failed or returned empty", key)
-        return stale
-    return []
+        # Re-check inside the lock: another thread may have just refreshed.
+        if not force_refresh:
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+        stocks: list[dict[str, Any]] = []
+        result: dict[str, Any] = {}
+        try:
+            scraper = RichBourseScraper(period=period, progression=progression)
+            result = scraper.scrape() or {}
+            if not result.get("error"):
+                stocks = result.get("stocks") or []
+        except Exception as e:
+            logger.warning("Palmarès scrape raised (%s): %s", key, e)
+        if stocks:
+            _note_refresh_success(key)
+            data_date = _parse_french_date(result.get("date") or "")
+            if data_date:
+                age_days = (date.today() - data_date).days
+                if age_days > 4:
+                    logger.warning("Palmarès (%s) data is %d days old (%s)", key, age_days, result.get("date"))
+            cache.set(key, stocks)
+            return stocks
+        _note_refresh_failure(key)
+        stale = cache.get_stale(key)
+        if stale is not None:
+            logger.info("Serving stale palmarès (%s): refresh failed or returned empty", key)
+            return stale
+        return []
+    finally:
+        lock.release()
 
 
 def _find_series_csv(symbol: str) -> Path | None:
@@ -205,7 +245,7 @@ def load_price_on_or_before(symbol: str, d: date, lookback_days: int = 7) -> dic
 
     BRVM is closed on weekends and holidays, so an exact-date lookup often
     returns nothing. This looks back up to `lookback_days` and returns the
-    last available trading day (row has keys: date, price).
+    last available trading day (row has keys: date, price, open, high, low, volume).
     """
     rows = load_series(
         symbol,
@@ -223,6 +263,12 @@ def load_series(
     *,
     fetch_if_missing: bool = True,
 ) -> list[dict[str, Any]]:
+    """Load series rows from the symbol's CSV, sorted by date, filtered to [start_date, end_date].
+
+    Each row always has keys: date (datetime.date), price (float, = close), and
+    open/high/low/volume (float or None when the CSV lacks those columns — legacy
+    2-column files — or the cells are empty).
+    """
     if fetch_if_missing:
         # Ensure CSV exists and is up-to-date before reading (scrape & save if stale)
         ensure_timeseries_up_to_date(symbol)
@@ -235,6 +281,16 @@ def load_series(
             return datetime.strptime(s.strip()[:10], "%Y-%m-%d").date()
         except ValueError:
             return date.min
+
+    def parse_opt(s: str | None) -> float | None:
+        # Optional numeric cell (Open/High/Low/Volume): None when the column is
+        # absent (legacy CSV) or the cell is empty/unparseable.
+        if not s:
+            return None
+        try:
+            return float(s.replace(",", "."))
+        except ValueError:
+            return None
 
     rows: list[dict[str, Any]] = []
     with open(p, newline="", encoding="utf-8") as f:
@@ -253,7 +309,14 @@ def load_series(
                 continue
             if end_date is not None and d > (end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date)[:10])):
                 continue
-            rows.append({"date": d, "price": price})
+            rows.append({
+                "date": d,
+                "price": price,
+                "open": parse_opt(row.get("Open")),
+                "high": parse_opt(row.get("High")),
+                "low": parse_opt(row.get("Low")),
+                "volume": parse_opt(row.get("Volume")),
+            })
 
     rows.sort(key=lambda r: r["date"])
     return rows

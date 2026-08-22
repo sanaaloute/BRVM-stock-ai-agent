@@ -24,16 +24,23 @@ def create_ollama_llm(model: str | None = None, temperature: float = 0, **kwargs
         if not model:
             model_name = config.OLLAMA_CLOUD_MODEL
 
+    # ChatOllama (langchain-ollama 1.1.x) declares no top-level timeout/max_retries
+    # or headers fields — unknown kwargs are silently ignored (pydantic
+    # extra="ignore"). Timeouts AND the Ollama Cloud Authorization header must go
+    # to the underlying ollama/httpx clients via client_kwargs; there is no
+    # client-level retry knob (the graph retries transient errors).
+    client_kwargs: dict[str, Any] = {"timeout": config.LLM_REQUEST_TIMEOUT}
+    if headers:
+        client_kwargs["headers"] = headers
     llm_kwargs: dict[str, Any] = {
         "model": model_name,
         "temperature": temperature,
         "keep_alive": _parse_keep_alive(config.OLLAMA_KEEP_ALIVE),
+        "client_kwargs": client_kwargs,
         **kwargs,
     }
     if base_url:
         llm_kwargs["base_url"] = base_url
-    if headers:
-        llm_kwargs["headers"] = headers
     return ChatOllama(**llm_kwargs)
 
 

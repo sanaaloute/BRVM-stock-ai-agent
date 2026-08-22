@@ -21,6 +21,8 @@ from app.scrapers import (
     SikaFinanceScraper,
     fetch_and_save_sgi,
 )
+from app.scrapers.richbourse import RICHBOURSE_PERIODS
+from app.scrapers.sikafinance import SIKAFINANCE_PERIODS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -113,8 +115,20 @@ def main() -> int:
         try:
             kwargs: dict[str, Any] = {"sleep_seconds": sleep}
             if name == "sikafinance":
+                if args.period not in SIKAFINANCE_PERIODS:
+                    logger.warning(
+                        "Period %r is not valid for sikafinance — it will silently fall back to 'veille'. "
+                        "Valid periods: %s",
+                        args.period, ", ".join(SIKAFINANCE_PERIODS),
+                    )
                 kwargs["period"] = args.period
             elif name == "richbourse":
+                if args.period not in RICHBOURSE_PERIODS:
+                    logger.warning(
+                        "Period %r is not valid for richbourse — it will silently fall back to 'veille'. "
+                        "Valid periods: %s",
+                        args.period, ", ".join(RICHBOURSE_PERIODS),
+                    )
                 kwargs["period"] = args.period
                 kwargs["progression"] = args.progression
             elif name == "richbourse_timeseries":

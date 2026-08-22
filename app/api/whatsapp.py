@@ -14,7 +14,11 @@ Meta webhook at https://<your-api-host>/whatsapp/webhook.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
+import hmac
+import json
 import logging
 import secrets
 import threading
@@ -46,8 +50,9 @@ _seen_lock = threading.Lock()
 
 def _is_duplicate(wamid: str) -> bool:
     now = time.monotonic()
+    ttl = config.WHATSAPP_DEDUP_TTL_SECONDS  # Meta can retry long after 10 min
     with _seen_lock:
-        for k, t in [kv for kv in _seen_ids.items() if now - kv[1] > 600]:
+        for k, t in [kv for kv in _seen_ids.items() if now - kv[1] > ttl]:
             _seen_ids.pop(k, None)
         if wamid in _seen_ids:
             return True
@@ -118,31 +123,38 @@ def _split_text(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     return chunks
 
 
-def _process_text(phone: str, body: str) -> None:
+# Bound concurrent background processing of webhook deliveries.
+_process_semaphore = asyncio.Semaphore(8)
+
+
+async def _process_text(phone: str, body: str) -> None:
     """Run one WhatsApp text message through the shared chat pipeline and reply."""
     # Lazy import: app.api.chat includes this router, so importing it at module
     # load would be circular.
-    from app.api.chat import ChatError, ChatRequest, chat
+    from app.api.chat import ChatError, ChatRequest, run_chat
 
     user_id = f"wa:{phone}"
-    try:
-        result = chat(ChatRequest(query=body, thread_id=f"wa-{phone}", user_id=user_id))
-        if isinstance(result, ChatError):
-            send_message(phone, result.error)
-            return
-        for chunk in _split_text(result.reply):
-            send_message(phone, chunk)
-        if result.image_base64:
-            try:
-                send_image(phone, base64.b64decode(result.image_base64), caption="📊")
-            except Exception as e:
-                logger.warning("WhatsApp image send failed for %s: %s", phone, e)
-    except Exception:
-        logger.exception("WhatsApp processing failed for %s", phone)
+    async with _process_semaphore:
         try:
-            send_message(phone, GENERIC_ERROR_MSG)
+            result = await run_chat(ChatRequest(query=body, thread_id=f"wa-{phone}", user_id=user_id))
+            if isinstance(result, ChatError):
+                await asyncio.to_thread(send_message, phone, result.error)
+                return
+            for chunk in _split_text(result.reply):
+                await asyncio.to_thread(send_message, phone, chunk)
+            if result.image_base64:
+                try:
+                    await asyncio.to_thread(
+                        send_image, phone, base64.b64decode(result.image_base64), caption="📊"
+                    )
+                except Exception as e:
+                    logger.warning("WhatsApp image send failed for %s: %s", phone, e)
         except Exception:
-            pass
+            logger.exception("WhatsApp processing failed for %s", phone)
+            try:
+                await asyncio.to_thread(send_message, phone, GENERIC_ERROR_MSG)
+            except Exception:
+                pass
 
 
 def _iter_messages(payload: dict):
@@ -183,13 +195,22 @@ def verify_webhook(
 
 @router.post("/whatsapp/webhook")
 async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"status": "ok"}  # ack anyway so Meta stops retrying
+    payload_bytes = await request.body()
     if not config.WHATSAPP_ENABLED:
         logger.debug("WhatsApp payload received but channel is disabled; dropping.")
         return {"status": "ok"}
+    # Authenticate the delivery: Meta signs the raw body with the app secret.
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + hmac.new(
+        config.WHATSAPP_APP_SECRET.encode(), payload_bytes, hashlib.sha256
+    ).hexdigest()
+    if not secrets.compare_digest(signature, expected):
+        logger.warning("WhatsApp webhook rejected: invalid X-Hub-Signature-256.")
+        raise HTTPException(status_code=401, detail="Invalid signature.")
+    try:
+        payload = json.loads(payload_bytes)
+    except Exception:
+        return {"status": "ok"}  # ack anyway so Meta stops retrying
     for phone, wamid, mtype, body in _iter_messages(payload):
         if wamid and _is_duplicate(wamid):
             logger.info("Duplicate WhatsApp delivery skipped: %s", wamid)

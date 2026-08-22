@@ -1,188 +1,52 @@
-"""User database: portfolio, tracking list, price targets, daily usage. BRVM only.
+"""User database: portfolio, tracking list, price targets, daily usage,
+digest subscriptions, score snapshots. BRVM only.
 
-Backends:
-- SQLite (default): local file at app/data/brvm_bot.db — zero config for dev.
-- PostgreSQL: when config.DATABASE_URL is set (production / docker compose).
+Persistence: SQLAlchemy (app/db) — PostgreSQL when config.DATABASE_URL is set
+(production / docker compose), else a local SQLite file at DB_PATH. The schema
+is managed by Alembic (app/db/migrations) and applied lazily once per target,
+so rebinding DB_PATH (tests) yields a fresh migrated database.
 
 All public functions keep identical signatures on both backends.
 """
 from __future__ import annotations
 
-import sqlite3
+import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import config
+from sqlalchemy import Text, cast, delete, func, select, update
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.db import engine as db_engine
+from app.db import migrate as db_migrate
+from app.db import models
 from app.utils._data import fetch_palmares
 from app.utils.brvm_companies import get_valid_symbols
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "brvm_bot.db"
-BACKEND = "postgres" if getattr(config, "DATABASE_URL", "") else "sqlite"
-
-DB_ERRORS: tuple = (sqlite3.Error,)
-if BACKEND == "postgres":
-    import psycopg
-
-    DB_ERRORS = (sqlite3.Error, psycopg.Error)
 
 
-def _get_conn():
-    if BACKEND == "postgres":
-        from psycopg.rows import dict_row
-
-        return psycopg.connect(config.DATABASE_URL, row_factory=dict_row)
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # The bot process (alert job) and the API process (portfolio tools) both
-    # write this DB. WAL + busy_timeout prevent cross-process lock errors.
-    conn = sqlite3.connect(str(DB_PATH), timeout=10.0)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=10000")
-    except sqlite3.Error:
-        pass
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _sql(stmt: str) -> str:
-    """Translate SQLite-flavored SQL to the active backend (placeholder + dialect)."""
-    if BACKEND == "sqlite":
-        return stmt
-    out = stmt.replace("?", "%s")
-    out = out.replace("MAX(", "GREATEST(")  # scalar max
-    out = out.replace("datetime('now')", "CURRENT_TIMESTAMP")
-    if out.lstrip().upper().startswith("INSERT OR IGNORE INTO"):
-        out = out.replace("INSERT OR IGNORE INTO", "INSERT INTO", 1)
-        out = out.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
-    return out
-
-
-def _val0(row) -> Any:
-    """First column of a row (sqlite3.Row or psycopg dict_row)."""
-    if isinstance(row, dict):
-        return next(iter(row.values()))
-    return row[0]
-
-
-_DDL_SQLITE = [
-    """CREATE TABLE IF NOT EXISTS users (
-        telegram_id INTEGER PRIMARY KEY,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )""",
-    """CREATE TABLE IF NOT EXISTS portfolio (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER NOT NULL,
-        symbol TEXT NOT NULL,
-        buy_price REAL NOT NULL,
-        buy_date TEXT NOT NULL,
-        quantity REAL NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id),
-        UNIQUE(telegram_id, symbol)
-    )""",
-    """CREATE TABLE IF NOT EXISTS tracking (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER NOT NULL,
-        symbol TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id),
-        UNIQUE(telegram_id, symbol)
-    )""",
-    """CREATE TABLE IF NOT EXISTS target_alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER NOT NULL,
-        symbol TEXT NOT NULL,
-        target_price REAL NOT NULL,
-        direction TEXT NOT NULL CHECK (direction IN ('above', 'below')),
-        notified INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_portfolio_telegram ON portfolio(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_tracking_telegram ON tracking(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_targets_telegram ON target_alerts(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_targets_pending ON target_alerts(notified) WHERE notified = 0",
-    """CREATE TABLE IF NOT EXISTS usage_daily (
-        user_id TEXT NOT NULL,
-        day TEXT NOT NULL,
-        count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (user_id, day)
-    )""",
-]
-
-_DDL_POSTGRES = [
-    """CREATE TABLE IF NOT EXISTS users (
-        telegram_id BIGINT PRIMARY KEY,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )""",
-    """CREATE TABLE IF NOT EXISTS portfolio (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_id BIGINT NOT NULL,
-        symbol TEXT NOT NULL,
-        buy_price DOUBLE PRECISION NOT NULL,
-        buy_date TEXT NOT NULL,
-        quantity DOUBLE PRECISION NOT NULL DEFAULT 1,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id),
-        UNIQUE(telegram_id, symbol)
-    )""",
-    """CREATE TABLE IF NOT EXISTS tracking (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_id BIGINT NOT NULL,
-        symbol TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id),
-        UNIQUE(telegram_id, symbol)
-    )""",
-    """CREATE TABLE IF NOT EXISTS target_alerts (
-        id BIGSERIAL PRIMARY KEY,
-        telegram_id BIGINT NOT NULL,
-        symbol TEXT NOT NULL,
-        target_price DOUBLE PRECISION NOT NULL,
-        direction TEXT NOT NULL CHECK (direction IN ('above', 'below')),
-        notified INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
-    )""",
-    "CREATE INDEX IF NOT EXISTS idx_portfolio_telegram ON portfolio(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_tracking_telegram ON tracking(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_targets_telegram ON target_alerts(telegram_id)",
-    "CREATE INDEX IF NOT EXISTS idx_targets_pending ON target_alerts(notified) WHERE notified = 0",
-    """CREATE TABLE IF NOT EXISTS usage_daily (
-        user_id TEXT NOT NULL,
-        day TEXT NOT NULL,
-        count INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (user_id, day)
-    )""",
-]
+# --- Engine / schema plumbing ---
+def _ensure_ready() -> None:
+    """Apply migrations for the current DB target (once per target per process)."""
+    db_migrate.ensure_schema()
 
 
 def init_db() -> None:
-    """Create tables if they do not exist. Cheap to call repeatedly."""
-    conn = _get_conn()
-    try:
-        if BACKEND == "postgres":
-            # One round trip in steady state: skip DDL when schema already exists.
-            row = conn.execute("SELECT to_regclass('public.users')").fetchone()
-            if row and _val0(row) is not None:
-                return
-            for stmt in _DDL_POSTGRES:
-                conn.execute(stmt)
-            conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS help_sent_at TEXT")
-            conn.commit()
-            return
-        for stmt in _DDL_SQLITE:
-            conn.execute(stmt)
-        conn.commit()
-        # Migration: add help_sent_at for new-user welcome (ignore if column exists)
-        try:
-            conn.execute("ALTER TABLE users ADD COLUMN help_sent_at TEXT")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-    finally:
-        conn.close()
+    """Back-compat alias for _ensure_ready() (tests call it after rebinding DB_PATH)."""
+    _ensure_ready()
+
+
+def reset_engine() -> None:
+    """Drop cached engines and migration markers (tests)."""
+    db_engine.reset_engines()
+    db_migrate.reset_cache()
+
+
+def _dialect_insert(table):
+    """Dialect-specific INSERT (enables ON CONFLICT clauses on both backends)."""
+    return db_engine.dialect_insert(table)
 
 
 def _today_utc() -> str:
@@ -190,97 +54,101 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+# --- Daily usage quota ---
+def _usage_increment_stmt(dialect_name: str, user_id: str, day: str):
+    """Atomic usage upsert returning the new count (dialect-specific ON CONFLICT).
+
+    The DO UPDATE clause uses the table-qualified `usage_daily.count + 1`: bare
+    `count` is ambiguous in Postgres upserts (table vs EXCLUDED).
+    """
+    t = models.UsageDaily.__table__
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects import postgresql
+
+        insert = postgresql.insert
+    else:
+        from sqlalchemy.dialects import sqlite
+
+        insert = sqlite.insert
+    stmt = insert(t).values(user_id=user_id, day=day, count=1)
+    return stmt.on_conflict_do_update(
+        index_elements=["user_id", "day"],
+        set_={"count": t.c.count + 1},
+    ).returning(t.c.count)
+
+
 def get_daily_usage(user_id: str) -> int:
     """Number of requests used today by this user key."""
-    init_db()
-    conn = _get_conn()
-    try:
-        row = conn.execute(
-            _sql("SELECT count FROM usage_daily WHERE user_id = ? AND day = ?"),
-            (str(user_id), _today_utc()),
-        ).fetchone()
-        return int(_val0(row)) if row else 0
-    finally:
-        conn.close()
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        value = s.execute(
+            select(models.UsageDaily.count).where(
+                models.UsageDaily.user_id == str(user_id),
+                models.UsageDaily.day == _today_utc(),
+            )
+        ).scalar_one_or_none()
+        return int(value) if value is not None else 0
 
 
 def increment_daily_usage(user_id: str) -> int:
     """Count one more request for today; return the new count. Prunes old days."""
-    init_db()
-    conn = _get_conn()
-    try:
-        today = _today_utc()
-        row = conn.execute(
-            # Table-qualified `usage_daily.count`: bare `count` is ambiguous in
-            # Postgres upserts (table vs EXCLUDED); SQLite accepts both forms.
-            _sql("""
-            INSERT INTO usage_daily (user_id, day, count) VALUES (?, ?, 1)
-            ON CONFLICT(user_id, day) DO UPDATE SET count = usage_daily.count + 1
-            RETURNING count
-            """),
-            (str(user_id), today),
-        ).fetchone()
-        conn.execute(_sql("DELETE FROM usage_daily WHERE day < ?"), (today,))
-        conn.commit()
-        return int(_val0(row)) if row else 0
-    finally:
-        conn.close()
+    _ensure_ready()
+    today = _today_utc()
+    engine = db_engine.get_engine()
+    with db_engine.session_scope() as s:
+        value = s.execute(
+            _usage_increment_stmt(engine.dialect.name, str(user_id), today)
+        ).scalar_one_or_none()
+        s.execute(delete(models.UsageDaily).where(models.UsageDaily.day < today))
+        return int(value) if value is not None else 0
 
 
 def decrement_daily_usage(user_id: str) -> None:
     """Refund one request for today (used when a counted request fails)."""
-    init_db()
-    conn = _get_conn()
-    try:
-        conn.execute(
-            _sql("UPDATE usage_daily SET count = MAX(count - 1, 0) WHERE user_id = ? AND day = ?"),
-            (str(user_id), _today_utc()),
+    _ensure_ready()
+    t = models.UsageDaily.__table__
+    if db_engine.get_engine().dialect.name == "postgresql":
+        floor = func.greatest(t.c.count - 1, 0)
+    else:
+        floor = func.max(t.c.count - 1, 0)  # SQLite scalar max
+    with db_engine.session_scope() as s:
+        s.execute(
+            update(models.UsageDaily)
+            .where(t.c.user_id == str(user_id), t.c.day == _today_utc())
+            .values(count=floor)
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
+# --- Users / welcome message ---
 def get_or_create_user(telegram_id: int) -> None:
     """Ensure user exists."""
-    init_db()
-    conn = _get_conn()
-    try:
-        conn.execute(
-            _sql("INSERT OR IGNORE INTO users (telegram_id) VALUES (?)"),
-            (telegram_id,),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    _ensure_ready()
+    stmt = _dialect_insert(models.User.__table__).values(telegram_id=telegram_id)
+    with db_engine.session_scope() as s:
+        s.execute(stmt.on_conflict_do_nothing())
 
 
 def has_sent_help(telegram_id: int) -> bool:
     """True if we have already sent the help/welcome message to this user."""
-    init_db()
-    conn = _get_conn()
-    try:
-        row = conn.execute(
-            _sql("SELECT help_sent_at FROM users WHERE telegram_id = ?"),
-            (telegram_id,),
-        ).fetchone()
-        return row is not None and _val0(row) is not None
-    finally:
-        conn.close()
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        value = s.execute(
+            select(models.User.help_sent_at).where(
+                models.User.telegram_id == telegram_id
+            )
+        ).scalar_one_or_none()
+        return value is not None
 
 
 def mark_help_sent(telegram_id: int) -> None:
     """Mark that we have sent the help message to this user."""
     get_or_create_user(telegram_id)
-    conn = _get_conn()
-    try:
-        conn.execute(
-            _sql("UPDATE users SET help_sent_at = datetime('now') WHERE telegram_id = ?"),
-            (telegram_id,),
+    with db_engine.session_scope() as s:
+        s.execute(
+            update(models.User)
+            .where(models.User.telegram_id == telegram_id)
+            .values(help_sent_at=cast(func.now(), Text))
         )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 # --- Portfolio ---
@@ -297,49 +165,62 @@ def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str
         return {"ok": False, "error": "Date d'achat invalide. Utilisez AAAA-MM-JJ."}
     if buy_price <= 0 or quantity <= 0:
         return {"ok": False, "error": "Le prix d'achat et la quantité doivent être positifs."}
-    conn = _get_conn()
+    t = models.Portfolio.__table__
+    stmt = _dialect_insert(t).values(
+        telegram_id=telegram_id,
+        symbol=symbol,
+        buy_price=buy_price,
+        buy_date=buy_date_str,
+        quantity=quantity,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["telegram_id", "symbol"],
+        set_={
+            "buy_price": stmt.excluded.buy_price,
+            "buy_date": stmt.excluded.buy_date,
+            "quantity": stmt.excluded.quantity,
+        },
+    )
     try:
-        conn.execute(
-            _sql("""INSERT INTO portfolio (telegram_id, symbol, buy_price, buy_date, quantity)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(telegram_id, symbol) DO UPDATE SET
-                 buy_price=excluded.buy_price, buy_date=excluded.buy_date, quantity=excluded.quantity"""),
-            (telegram_id, symbol, buy_price, buy_date_str, quantity),
-        )
-        conn.commit()
+        with db_engine.session_scope() as s:
+            s.execute(stmt)
         return {"ok": True, "message": f"Ajout/mise à jour : {symbol} : {quantity} @ {buy_price} F CFA le {buy_date_str}."}
-    except DB_ERRORS as e:
+    except SQLAlchemyError as e:
         return {"ok": False, "error": str(e)}
-    finally:
-        conn.close()
 
 
 def portfolio_list(telegram_id: int) -> list[dict[str, Any]]:
     """List portfolio rows for user."""
     get_or_create_user(telegram_id)
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            _sql("SELECT symbol, buy_price, buy_date, quantity, created_at FROM portfolio WHERE telegram_id = ? ORDER BY symbol"),
-            (telegram_id,),
-        ).fetchall()
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(
+                models.Portfolio.symbol,
+                models.Portfolio.buy_price,
+                models.Portfolio.buy_date,
+                models.Portfolio.quantity,
+                models.Portfolio.created_at,
+            )
+            .where(models.Portfolio.telegram_id == telegram_id)
+            .order_by(models.Portfolio.symbol)
+        ).mappings().all()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
     """Remove a symbol from portfolio."""
+    _ensure_ready()
     symbol = (symbol or "").strip().upper()
-    conn = _get_conn()
-    try:
-        cur = conn.execute(_sql("DELETE FROM portfolio WHERE telegram_id = ? AND symbol = ?"), (telegram_id, symbol))
-        conn.commit()
-        if cur.rowcount:
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.Portfolio).where(
+                models.Portfolio.telegram_id == telegram_id,
+                models.Portfolio.symbol == symbol,
+            )
+        )
+        if res.rowcount:
             return {"ok": True, "message": f"{symbol} retiré de votre portefeuille."}
         return {"ok": False, "error": f"Aucune position {symbol} dans votre portefeuille."}
-    finally:
-        conn.close()
 
 
 def _current_price(symbol: str) -> float | None:
@@ -395,15 +276,13 @@ def portfolio_summary(telegram_id: int) -> dict[str, Any]:
 # --- Tracking ---
 def tracking_list(telegram_id: int) -> list[dict[str, Any]]:
     get_or_create_user(telegram_id)
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            _sql("SELECT symbol, created_at FROM tracking WHERE telegram_id = ? ORDER BY symbol"),
-            (telegram_id,),
-        ).fetchall()
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(models.Tracking.symbol, models.Tracking.created_at)
+            .where(models.Tracking.telegram_id == telegram_id)
+            .order_by(models.Tracking.symbol)
+        ).mappings().all()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def tracking_add(telegram_id: int, symbol: str) -> dict[str, Any]:
@@ -411,28 +290,30 @@ def tracking_add(telegram_id: int, symbol: str) -> dict[str, Any]:
     if symbol not in get_valid_symbols():
         return {"ok": False, "error": f"{symbol} n'est pas un symbole BRVM coté."}
     get_or_create_user(telegram_id)
-    conn = _get_conn()
+    stmt = _dialect_insert(models.Tracking.__table__).values(
+        telegram_id=telegram_id, symbol=symbol
+    )
     try:
-        conn.execute(_sql("INSERT OR IGNORE INTO tracking (telegram_id, symbol) VALUES (?, ?)"), (telegram_id, symbol))
-        conn.commit()
+        with db_engine.session_scope() as s:
+            s.execute(stmt.on_conflict_do_nothing())
         return {"ok": True, "message": f"{symbol} ajouté à votre liste de suivi."}
-    except DB_ERRORS as e:
+    except SQLAlchemyError as e:
         return {"ok": False, "error": str(e)}
-    finally:
-        conn.close()
 
 
 def tracking_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
+    _ensure_ready()
     symbol = (symbol or "").strip().upper()
-    conn = _get_conn()
-    try:
-        cur = conn.execute(_sql("DELETE FROM tracking WHERE telegram_id = ? AND symbol = ?"), (telegram_id, symbol))
-        conn.commit()
-        if cur.rowcount:
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.Tracking).where(
+                models.Tracking.telegram_id == telegram_id,
+                models.Tracking.symbol == symbol,
+            )
+        )
+        if res.rowcount:
             return {"ok": True, "message": f"{symbol} retiré du suivi."}
         return {"ok": False, "error": f"{symbol} n'était pas dans votre liste de suivi."}
-    finally:
-        conn.close()
 
 
 # --- Target alerts ---
@@ -446,67 +327,78 @@ def target_add(telegram_id: int, symbol: str, target_price: float, direction: st
     if direction not in ("above", "below"):
         direction = "above"
     get_or_create_user(telegram_id)
-    conn = _get_conn()
     try:
-        conn.execute(
-            _sql("INSERT INTO target_alerts (telegram_id, symbol, target_price, direction) VALUES (?, ?, ?, ?)"),
-            (telegram_id, symbol, target_price, direction),
-        )
-        conn.commit()
+        with db_engine.session_scope() as s:
+            s.execute(
+                models.TargetAlert.__table__.insert().values(
+                    telegram_id=telegram_id,
+                    symbol=symbol,
+                    target_price=target_price,
+                    direction=direction,
+                )
+            )
         dir_fr = "au-dessus" if direction == "above" else "en dessous"
         return {"ok": True, "message": f"Alerte définie : notification quand {symbol} atteint {target_price} F CFA ({dir_fr})."}
-    except DB_ERRORS as e:
+    except SQLAlchemyError as e:
         return {"ok": False, "error": str(e)}
-    finally:
-        conn.close()
 
 
 def target_list(telegram_id: int) -> list[dict[str, Any]]:
     get_or_create_user(telegram_id)
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            _sql("SELECT symbol, target_price, direction, notified, created_at FROM target_alerts WHERE telegram_id = ? ORDER BY symbol"),
-            (telegram_id,),
-        ).fetchall()
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(
+                models.TargetAlert.symbol,
+                models.TargetAlert.target_price,
+                models.TargetAlert.direction,
+                models.TargetAlert.notified,
+                models.TargetAlert.created_at,
+            )
+            .where(models.TargetAlert.telegram_id == telegram_id)
+            .order_by(models.TargetAlert.symbol)
+        ).mappings().all()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def target_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
+    _ensure_ready()
     symbol = (symbol or "").strip().upper()
-    conn = _get_conn()
-    try:
-        cur = conn.execute(_sql("DELETE FROM target_alerts WHERE telegram_id = ? AND symbol = ?"), (telegram_id, symbol))
-        conn.commit()
-        if cur.rowcount:
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.TargetAlert).where(
+                models.TargetAlert.telegram_id == telegram_id,
+                models.TargetAlert.symbol == symbol,
+            )
+        )
+        if res.rowcount:
             return {"ok": True, "message": f"Alerte de prix supprimée pour {symbol}."}
         return {"ok": False, "error": f"Aucune alerte définie pour {symbol}."}
-    finally:
-        conn.close()
 
 
 def get_pending_alerts() -> list[dict[str, Any]]:
     """All target alerts that are not yet notified."""
-    init_db()
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            _sql("SELECT id, telegram_id, symbol, target_price, direction FROM target_alerts WHERE notified = 0")
-        ).fetchall()
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(
+                models.TargetAlert.id,
+                models.TargetAlert.telegram_id,
+                models.TargetAlert.symbol,
+                models.TargetAlert.target_price,
+                models.TargetAlert.direction,
+            ).where(models.TargetAlert.notified == 0)
+        ).mappings().all()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def mark_alert_notified(alert_id: int) -> None:
-    conn = _get_conn()
-    try:
-        conn.execute(_sql("UPDATE target_alerts SET notified = 1 WHERE id = ?"), (alert_id,))
-        conn.commit()
-    finally:
-        conn.close()
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        s.execute(
+            update(models.TargetAlert)
+            .where(models.TargetAlert.id == alert_id)
+            .values(notified=1)
+        )
 
 
 def check_targets_and_notify() -> list[tuple[int, str]]:
@@ -532,3 +424,154 @@ def check_targets_and_notify() -> list[tuple[int, str]]:
             ))
             mark_alert_notified(a["id"])
     return to_send
+
+
+# --- Digest subscriptions ---
+DIGEST_FREQUENCIES = ("daily", "weekly")
+
+
+def digest_set(telegram_id: int, frequency: str) -> dict[str, Any]:
+    """Subscribe (or re-subscribe) a user to the daily/weekly digest."""
+    frequency = (frequency or "").strip().lower()
+    if frequency not in DIGEST_FREQUENCIES:
+        return {"ok": False, "error": "Fréquence invalide. Choisissez 'daily' ou 'weekly'."}
+    get_or_create_user(telegram_id)
+    t = models.DigestSubscription.__table__
+    stmt = _dialect_insert(t).values(
+        telegram_id=telegram_id, frequency=frequency, enabled=1
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["telegram_id"],
+        set_={"frequency": stmt.excluded.frequency, "enabled": 1},
+    )
+    try:
+        with db_engine.session_scope() as s:
+            s.execute(stmt)
+        freq_fr = "quotidien" if frequency == "daily" else "hebdomadaire"
+        return {"ok": True, "message": f"Digest {freq_fr} activé : vous recevrez un résumé du marché BRVM."}
+    except SQLAlchemyError as e:
+        return {"ok": False, "error": str(e)}
+
+
+def digest_get(telegram_id: int) -> dict[str, Any] | None:
+    """Digest subscription row for a user (None when never subscribed)."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        row = s.execute(
+            select(
+                models.DigestSubscription.telegram_id,
+                models.DigestSubscription.frequency,
+                models.DigestSubscription.enabled,
+                models.DigestSubscription.created_at,
+            ).where(models.DigestSubscription.telegram_id == telegram_id)
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+def digest_unsubscribe(telegram_id: int) -> dict[str, Any]:
+    """Disable the digest subscription (row kept for re-subscribe)."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            update(models.DigestSubscription)
+            .where(models.DigestSubscription.telegram_id == telegram_id)
+            .values(enabled=0)
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Digest désactivé : vous ne recevrez plus de résumé automatique."}
+        return {"ok": False, "error": "Aucun abonnement digest pour ce compte."}
+
+
+def digest_subscribers(frequency: str | None = None) -> list[int]:
+    """Telegram ids with an enabled subscription, optionally filtered by frequency."""
+    _ensure_ready()
+    stmt = select(models.DigestSubscription.telegram_id).where(
+        models.DigestSubscription.enabled == 1
+    )
+    if frequency:
+        stmt = stmt.where(
+            models.DigestSubscription.frequency == frequency.strip().lower()
+        )
+    with db_engine.session_scope() as s:
+        return [int(r[0]) for r in s.execute(stmt).all()]
+
+
+# --- Score snapshots ---
+def save_score_snapshots(rows: list[dict]) -> None:
+    """Persist one score snapshot per symbol for a day (default: today UTC).
+
+    Idempotent daily write: existing rows for the same (symbol, day) are
+    replaced. Row keys: symbol, score, signal; optional day, details (object)
+    or details_json (pre-serialized string).
+    """
+    if not rows:
+        return
+    _ensure_ready()
+    today = _today_utc()
+    normalized = []
+    for r in rows:
+        symbol = str(r.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        details = r.get("details_json")
+        if details is None:
+            details = json.dumps(r.get("details") or {}, ensure_ascii=False)
+        normalized.append({
+            "symbol": symbol,
+            "day": str(r.get("day") or today),
+            "score": float(r.get("score") or 0.0),
+            "signal": str(r.get("signal") or ""),
+            "details_json": details,
+        })
+    with db_engine.session_scope() as s:
+        for symbol, day in {(r["symbol"], r["day"]) for r in normalized}:
+            s.execute(
+                delete(models.ScoreSnapshot).where(
+                    models.ScoreSnapshot.symbol == symbol,
+                    models.ScoreSnapshot.day == day,
+                )
+            )
+        if normalized:
+            s.execute(models.ScoreSnapshot.__table__.insert(), normalized)
+
+
+def _snapshots_for_day(day: str) -> list[dict[str, Any]]:
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(
+                models.ScoreSnapshot.symbol,
+                models.ScoreSnapshot.day,
+                models.ScoreSnapshot.score,
+                models.ScoreSnapshot.signal,
+                models.ScoreSnapshot.details_json,
+                models.ScoreSnapshot.created_at,
+            )
+            .where(models.ScoreSnapshot.day == day)
+            .order_by(models.ScoreSnapshot.symbol)
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+def get_latest_snapshots(day: str | None = None) -> list[dict[str, Any]]:
+    """Snapshots for `day` (default: the most recent day with data)."""
+    _ensure_ready()
+    if day is None:
+        with db_engine.session_scope() as s:
+            day = s.execute(select(func.max(models.ScoreSnapshot.day))).scalar()
+        if day is None:
+            return []
+    return _snapshots_for_day(day)
+
+
+def get_previous_snapshots(before_day: str) -> list[dict[str, Any]]:
+    """Snapshots of the most recent day strictly before `before_day`."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        day = s.execute(
+            select(func.max(models.ScoreSnapshot.day)).where(
+                models.ScoreSnapshot.day < before_day
+            )
+        ).scalar()
+    if day is None:
+        return []
+    return _snapshots_for_day(day)

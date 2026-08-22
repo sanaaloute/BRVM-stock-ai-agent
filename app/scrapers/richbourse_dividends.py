@@ -47,9 +47,13 @@ def fetch_richbourse_dividends(limit: int = 50, symbol: str | None = None) -> di
         return out
 
     # Page date (e.g. "Vendredi 27 Février 2026")
+    months_re = re.compile(
+        r"janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre",
+        re.IGNORECASE,
+    )
     for p in soup.find_all(["p", "div"]):
         text = (p.get_text() or "").strip()
-        if "Février" in text or "Janvier" in text or "Mars" in text or "Avril" in text:
+        if months_re.search(text):
             if re.search(r"\d{4}", text):
                 out["date_page"] = text
                 break
@@ -63,7 +67,7 @@ def fetch_richbourse_dividends(limit: int = 50, symbol: str | None = None) -> di
             continue
         if "DIVIDENDE" not in header_text:
             continue
-        for row in rows[1 : limit + 1]:
+        for row in rows[1:]:
             cells = row.find_all("td")
             # Table: # | Société | Dividende | Rendement | Ex-dividende | Date paiement
             if len(cells) < 4:
@@ -93,4 +97,6 @@ def fetch_richbourse_dividends(limit: int = 50, symbol: str | None = None) -> di
             })
         break
 
+    # Limit applied after the symbol filter, not before
+    out["items"] = out["items"][:limit]
     return out

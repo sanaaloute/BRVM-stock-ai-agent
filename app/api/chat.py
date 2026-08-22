@@ -3,22 +3,26 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import logging
 import secrets
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import delete, select
 
 import config
 from app.agents import run_agent
 from app.agents.graph import CHAT_MEMORY_DB
 from app.bot.redact import redact_for_telegram
+from app.db import engine as db_engine
+from app.db import migrate as db_migrate
+from app.db import models as db_models
 from app.models.llm import get_default_model
 from app.utils.user_db import decrement_daily_usage, increment_daily_usage
 
@@ -121,23 +125,30 @@ def _get_checkpointer():
 # Cap concurrent agent runs so a burst of users can't melt the LLM backend.
 _agent_semaphore = threading.Semaphore(max(1, config.MAX_CONCURRENT_AGENTS))
 
+# Dedicated executor for agent runs: keeps /chat off Starlette's shared anyio
+# threadpool, so queued requests (each holding a pool thread while it waits on
+# the agent semaphore) can't stall unrelated endpoints like /health.
+_chat_executor = ThreadPoolExecutor(
+    max_workers=max(2, config.MAX_CONCURRENT_AGENTS + 2),
+    thread_name_prefix="chat-agent",
+)
 
-def _extract_reply(messages: list) -> str:
-    for m in reversed(messages):
-        if not getattr(m, "content", None):
-            continue
-        content = str(m.content).strip()
-        if "[NLU]" in content:
-            continue
-        kind = getattr(m, "type", None) or type(m).__name__
-        if kind == "ai" or "AI" in str(kind):
-            return content
-    for m in reversed(messages):
-        if getattr(m, "content", None) and "Human" not in type(m).__name__:
-            content = str(m.content).strip()
-            if "[NLU]" not in content:
-                return content
-    return "Aucune réponse de l'assistant."
+# One agent run at a time per conversation thread: concurrent runs on the same
+# thread_id would interleave checkpoint writes (lost history, duplicated effects).
+_thread_locks: dict[str, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
+_THREAD_LOCKS_MAX = 10_000
+
+
+def _thread_lock(thread_id: str) -> threading.Lock:
+    """Per-thread lock registry, bounded (locks are cheap to recreate)."""
+    with _thread_locks_guard:
+        if len(_thread_locks) > _THREAD_LOCKS_MAX:
+            _thread_locks.clear()
+        lock = _thread_locks.get(thread_id)
+        if lock is None:
+            lock = _thread_locks[thread_id] = threading.Lock()
+        return lock
 
 
 def _user_friendly_error(exc: Exception) -> str:
@@ -180,81 +191,63 @@ class ClearMemoryRequest(BaseModel):
 
 
 def clear_all_chat_memory() -> None:
-    """Erase all conversation checkpoints. Safe to call if DB/tables do not exist."""
-    if config.DATABASE_URL:
-        try:
+    """Erase all conversation checkpoints + thread activity. Safe if tables do not exist."""
+    try:
+        if config.DATABASE_URL:
             import psycopg
 
             with psycopg.connect(config.DATABASE_URL) as conn:
-                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints", "thread_activity"):
+                for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
                     try:
                         conn.execute(f"DELETE FROM {table}")
                     except psycopg.Error:
                         pass  # table may not exist yet
                 conn.commit()
             logger.info("Chat memory wiped (all threads, PostgreSQL).")
-        except Exception as e:
-            logger.warning("Chat memory wipe failed: %s", e)
-        return
-    if not CHAT_MEMORY_DB.exists():
-        return
-    try:
-        with sqlite3.connect(str(CHAT_MEMORY_DB)) as conn:
-            conn.execute("DELETE FROM writes")
-            conn.execute("DELETE FROM checkpoints")
-            try:
-                conn.execute("DELETE FROM thread_activity")
-            except sqlite3.OperationalError:
-                pass  # table may not exist yet
-            conn.commit()
-        logger.info("Chat memory wiped (all threads).")
+        elif CHAT_MEMORY_DB.exists():
+            with sqlite3.connect(str(CHAT_MEMORY_DB)) as conn:
+                conn.execute("DELETE FROM writes")
+                conn.execute("DELETE FROM checkpoints")
+                conn.commit()
+            logger.info("Chat memory wiped (all threads).")
+        _clear_thread_activity()
     except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
-            return
-        logger.warning("Chat memory wipe failed (tables may not exist yet): %s", e)
+        if "no such table" not in str(e).lower():
+            logger.warning("Chat memory wipe failed (tables may not exist yet): %s", e)
     except Exception as e:
         logger.warning("Chat memory wipe failed: %s", e)
 
 
+def _clear_thread_activity() -> None:
+    """Wipe the thread_activity table (shared user DB) — best effort."""
+    try:
+        db_migrate.ensure_schema()
+        with db_engine.session_scope() as s:
+            s.execute(delete(db_models.ThreadActivity))
+    except Exception as e:
+        logger.warning("Thread activity wipe failed: %s", e)
+
+
 # --- Per-thread activity tracking + TTL-based cleanup -----------------------
-# A tiny table in the checkpoint DB records the last activity per thread_id.
-# cleanup_stale_threads() wipes threads inactive for > MEMORY_TTL_HOURS.
-
-def _activity_connect():
-    """Raw connection to the checkpoint DB, in autocommit mode (SQLite or Postgres)."""
-    if config.DATABASE_URL:
-        import psycopg
-
-        return psycopg.connect(config.DATABASE_URL, autocommit=True)
-    CHAT_MEMORY_DB.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(str(CHAT_MEMORY_DB), timeout=30.0, isolation_level=None)
-
-
-def _placeholder() -> str:
-    """SQL parameter placeholder for the active backend (psycopg vs sqlite3)."""
-    return "%s" if config.DATABASE_URL else "?"
-
-
-def _ensure_activity_table(conn) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS thread_activity "
-        "(thread_id TEXT PRIMARY KEY, last_seen DOUBLE PRECISION)"
-    )
-
+# thread_activity lives in the shared user DB (app/db): last activity per
+# thread_id. cleanup_stale_threads() wipes threads inactive > MEMORY_TTL_HOURS.
 
 def touch_thread_activity(thread_id: str | None) -> None:
     """Record activity for a conversation thread (best-effort, never raises)."""
     if not thread_id:
         return
     try:
-        with contextlib.closing(_activity_connect()) as conn:
-            _ensure_activity_table(conn)
-            ph = _placeholder()
-            conn.execute(
-                f"INSERT INTO thread_activity (thread_id, last_seen) VALUES ({ph}, {ph}) "
-                "ON CONFLICT(thread_id) DO UPDATE SET last_seen = excluded.last_seen",
-                (thread_id, time.time()),
-            )
+        db_migrate.ensure_schema()
+        t = db_models.ThreadActivity.__table__
+        stmt = db_engine.dialect_insert(t).values(
+            thread_id=thread_id, last_seen=time.time()
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["thread_id"],
+            set_={"last_seen": stmt.excluded.last_seen},
+        )
+        with db_engine.session_scope() as s:
+            s.execute(stmt)
     except Exception as e:
         logger.warning("touch_thread_activity failed: %s", e)
 
@@ -269,24 +262,33 @@ def cleanup_stale_threads() -> None:
         return
     cutoff = time.time() - ttl * 3600
     try:
-        with contextlib.closing(_activity_connect()) as conn:
-            _ensure_activity_table(conn)
-            ph = _placeholder()
-            rows = conn.execute(
-                f"SELECT thread_id FROM thread_activity WHERE last_seen < {ph}", (cutoff,)
-            ).fetchall()
-            stale = [r[0] for r in rows]
+        db_migrate.ensure_schema()
+        with db_engine.session_scope() as s:
+            stale = [
+                r[0]
+                for r in s.execute(
+                    select(db_models.ThreadActivity.thread_id).where(
+                        db_models.ThreadActivity.last_seen < cutoff
+                    )
+                )
+            ]
+            deleted: list[str] = []
             for tid in stale:
                 try:
                     _get_checkpointer().delete_thread(tid)
+                    deleted.append(tid)
                 except Exception as e:
                     logger.warning("delete_thread(%s) failed: %s", tid, e)
-            if stale:
-                conn.execute(
-                    f"DELETE FROM thread_activity WHERE last_seen < {ph}", (cutoff,)
+            if deleted:
+                # Only forget threads whose checkpoints were actually deleted;
+                # failures stay in thread_activity so the next pass retries them.
+                s.execute(
+                    delete(db_models.ThreadActivity).where(
+                        db_models.ThreadActivity.thread_id.in_(deleted)
+                    )
                 )
                 logger.info(
-                    "Cleaned up %d stale conversation(s) (TTL %.1fh).", len(stale), ttl
+                    "Cleaned up %d stale conversation(s) (TTL %.1fh).", len(deleted), ttl
                 )
     except Exception as e:
         logger.warning("cleanup_stale_threads failed: %s", e)
@@ -296,8 +298,11 @@ def _quota_active(user_key: str) -> bool:
     return config.DAILY_FREE_QUOTA > 0 and user_key not in config.QUOTA_EXEMPT_IDS
 
 
-@router.post("/chat", dependencies=[Depends(verify_api_key)])
-def chat(req: ChatRequest) -> ChatResponse | ChatError:
+def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
+    """Sync chat pipeline: rate limit, quota, agent run, reply sanitization.
+
+    Runs on _chat_executor (via run_chat) — never call from the event loop.
+    """
     if req.user_id:
         user_key = req.user_id
     elif req.telegram_user_id is not None:
@@ -331,21 +336,29 @@ def chat(req: ChatRequest) -> ChatResponse | ChatError:
                     )
                 )
             counted = True
-        result = run_agent(
-            query=req.query,
-            model=get_default_model(),
-            thread_id=req.thread_id,
-            telegram_user_id=req.telegram_user_id,
-            checkpointer=_get_checkpointer(),
-        )
+        # One run at a time per conversation thread, inside the semaphore-
+        # protected section (concurrent runs would corrupt the checkpoint).
+        with _thread_lock(req.thread_id):
+            result = run_agent(
+                query=req.query,
+                model=get_default_model(),
+                thread_id=req.thread_id,
+                telegram_user_id=req.telegram_user_id,
+                checkpointer=_get_checkpointer(),
+            )
 
         clarification = result.get("clarification")
         if clarification:
             reply = redact_for_telegram(clarification)
             return ChatResponse(reply=reply + SOURCE_FOOTER, clarification=True)
 
-        messages = result.get("messages") or []
-        raw_reply = _extract_reply(messages)
+        raw_reply = result.get("_fresh_reply")
+        if raw_reply is None:
+            # This run produced no fresh AI reply (e.g. all workers failed).
+            # Never fall back to older checkpoint messages: that could serve a
+            # stale previous-turn answer (or raw ToolMessage JSON) as the reply.
+            logger.warning("No fresh reply produced for thread %s", req.thread_id)
+            return ChatError(error="Une erreur s'est produite. Veuillez réessayer.")
         reply = redact_for_telegram(raw_reply)
         reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
 
@@ -361,11 +374,25 @@ def chat(req: ChatRequest) -> ChatResponse | ChatError:
         return ChatResponse(reply=reply, image_base64=image_base64)
     except Exception as e:
         if counted:
-            decrement_daily_usage(user_key)  # refund: failed requests are free
+            try:
+                decrement_daily_usage(user_key)  # refund: failed requests are free
+            except Exception:
+                logger.warning("Quota refund failed for %s", user_key, exc_info=True)
         logger.exception("Chat API error: %s", e)
         return ChatError(error=_user_friendly_error(e))
     finally:
         _agent_semaphore.release()
+
+
+async def run_chat(req: ChatRequest) -> ChatResponse | ChatError:
+    """Run one chat request on the dedicated executor (awaitable from channels)."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_chat_executor, _chat_impl, req)
+
+
+@router.post("/chat", dependencies=[Depends(verify_api_key)])
+async def chat(req: ChatRequest) -> ChatResponse | ChatError:
+    return await run_chat(req)
 
 
 @router.post("/clear-memory", dependencies=[Depends(verify_api_key)])

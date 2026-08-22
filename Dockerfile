@@ -25,13 +25,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 
 # Pre-download the whisper model (voice-to-text) so the first voice note is fast
 # and the container needs no Hugging Face access at runtime. Bakes ~250MB (small,
-# int8) into the image. Override with: docker compose build --build-arg WHISPER_MODEL=base
+# int8) into the image. HF_HOME pins the Hugging Face cache under /app so the
+# baked model lands in the tree owned by the runtime user (see below) and is
+# found again at runtime. Override with: docker compose build --build-arg WHISPER_MODEL=base
 ARG WHISPER_MODEL=small
 ENV WHISPER_MODEL=${WHISPER_MODEL}
+ENV HF_HOME=/app/.cache/huggingface
 RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Run as an unprivileged user. chown the whole /app tree so the code stays
+# readable and the runtime-writable paths belong to it: /app/app/data (the
+# bot_data volume mount point — named-volume copy-up inherits image ownership
+# on first mount) and the HF_HOME whisper cache. Playwright browsers stay at
+# /ms-playwright (base image default, already world read+execute).
+RUN useradd --create-home --shell /bin/bash bot \
+    && chown -R bot:bot /app
+USER bot
 
 # Entrypoint bootstraps SGI (broker) data into the shared volume on startup.
 ENTRYPOINT ["/app/entrypoint.sh"]

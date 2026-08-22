@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 
+import datetime
+
 import logging
 
 import multiprocessing
@@ -23,6 +25,8 @@ from fastapi import FastAPI
 import config
 
 from app.api.chat import cleanup_stale_threads, router as chat_router
+
+from app.api.whatsapp import router as whatsapp_router
 
 from app.channels.whatsapp import router as whatsapp_evolution_router
 
@@ -49,6 +53,10 @@ logger = logging.getLogger(__name__)
 DAILY_INTERVAL_SEC = 24 * 3600
 
 TARGET_CHECK_INTERVAL_SEC = 300
+
+DIGEST_ENABLED = getattr(config, "DIGEST_ENABLED", True)
+
+DIGEST_HOUR_GMT = int(getattr(config, "DIGEST_HOUR_GMT", 18))  # weekdays, post-close (GMT == Abidjan)
 
 
 
@@ -88,7 +96,11 @@ async def _check_target_alerts(context) -> None:
 
         from app.utils.user_db import check_targets_and_notify
 
-        for telegram_id, text in check_targets_and_notify():
+        # Blocking (sleeps + HTTP with retries): keep it off the event loop.
+
+        results = await asyncio.to_thread(check_targets_and_notify)
+
+        for telegram_id, text in results:
 
             try:
 
@@ -103,6 +115,50 @@ async def _check_target_alerts(context) -> None:
     except Exception as e:
 
         logger.exception("Target check job failed: %s", e)
+
+
+
+
+
+async def _digest_job(context) -> None:
+
+    """Job: score the market, persist score snapshots and push the digest to /digest subscribers."""
+
+    try:
+
+        from app.bot.telegram_bot import MAX_MESSAGE_LENGTH
+
+        from app.services.digest import run_digest
+
+        # Blocking (scores every symbol from the local caches + DB): off the event loop.
+
+        pairs = await asyncio.to_thread(run_digest, "daily")
+
+        if datetime.datetime.now(datetime.timezone.utc).weekday() == 4:
+
+            # Friday: weekly subscribers get their edition too.
+
+            pairs += await asyncio.to_thread(run_digest, "weekly")
+
+        for telegram_id, text in pairs:
+
+            try:
+
+                if len(text) > MAX_MESSAGE_LENGTH:
+
+                    text = text[: MAX_MESSAGE_LENGTH - 20] + "\n\n… (tronqué)"
+
+                await context.bot.send_message(chat_id=telegram_id, text=text)
+
+                logger.info("Digest sent to user %s", telegram_id)
+
+            except Exception as e:
+
+                logger.warning("Failed to send digest to %s: %s", telegram_id, e)
+
+    except Exception as e:
+
+        logger.exception("Digest job failed: %s", e)
 
 
 
@@ -139,6 +195,20 @@ def _run_telegram_bot() -> None:
     if app.job_queue is not None:
 
         app.job_queue.run_repeating(_check_target_alerts, interval=TARGET_CHECK_INTERVAL_SEC, first=60)
+
+        if DIGEST_ENABLED:
+
+            app.job_queue.run_daily(
+
+                _digest_job,
+
+                time=datetime.time(hour=DIGEST_HOUR_GMT, tzinfo=datetime.timezone.utc),
+
+                days=(0, 1, 2, 3, 4),
+
+            )
+
+            logger.info("Digest scheduled: weekdays at %s:00 GMT (weekly edition on Friday).", DIGEST_HOUR_GMT)
 
         logger.info(
 
@@ -249,6 +319,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="BRVM Chat API", version="1.0", lifespan=lifespan)
 
 app.include_router(chat_router)
+
+app.include_router(whatsapp_router)
 
 app.include_router(whatsapp_evolution_router)
 

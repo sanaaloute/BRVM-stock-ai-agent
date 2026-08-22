@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -9,6 +10,8 @@ logger = logging.getLogger(__name__)
 # Lazy-loaded singleton: the model is loaded on first voice note, not at import.
 _whisper_model = None
 _whisper_unavailable = False
+_whisper_model_lock = threading.Lock()  # serialize the one-time ~1GB model load
+_google_notice_logged = False
 
 
 def _get_whisper_model():
@@ -16,27 +19,30 @@ def _get_whisper_model():
     if _whisper_unavailable:
         return None
     if _whisper_model is None:
-        try:
-            from faster_whisper import WhisperModel
+        # Two simultaneous first voice notes must not double-load the model.
+        with _whisper_model_lock:
+            if _whisper_model is None and not _whisper_unavailable:
+                try:
+                    from faster_whisper import WhisperModel
 
-            import config
+                    import config
 
-            _whisper_model = WhisperModel(
-                config.WHISPER_MODEL,
-                device="cpu",
-                compute_type=config.WHISPER_COMPUTE_TYPE,
-            )
-            logger.info(
-                "Whisper model loaded: %s (%s)",
-                config.WHISPER_MODEL,
-                config.WHISPER_COMPUTE_TYPE,
-            )
-        except Exception as e:
-            _whisper_unavailable = True
-            logger.warning(
-                "faster-whisper unavailable, falling back to Google Speech: %s", e
-            )
-            return None
+                    _whisper_model = WhisperModel(
+                        config.WHISPER_MODEL,
+                        device="cpu",
+                        compute_type=config.WHISPER_COMPUTE_TYPE,
+                    )
+                    logger.info(
+                        "Whisper model loaded: %s (%s)",
+                        config.WHISPER_MODEL,
+                        config.WHISPER_COMPUTE_TYPE,
+                    )
+                except Exception as e:
+                    _whisper_unavailable = True
+                    logger.warning(
+                        "faster-whisper unavailable, falling back to Google Speech: %s", e
+                    )
+                    return None
     return _whisper_model
 
 
@@ -103,6 +109,7 @@ def _google_to_text(path: Path, language: str) -> str | None:
 
 def voice_to_text(audio_path: str | Path, language: str = "fr-FR") -> str | None:
     """Transcribe a voice note. Tries local whisper first, then Google Speech."""
+    global _google_notice_logged
     path = Path(audio_path)
     if not path.exists():
         logger.warning("Audio file not found: %s", path)
@@ -110,4 +117,9 @@ def voice_to_text(audio_path: str | Path, language: str = "fr-FR") -> str | None
     text = _whisper_to_text(path, language)
     if text:
         return text
+    if not _google_notice_logged:
+        _google_notice_logged = True
+        logger.warning(
+            "Google Speech fallback in use: user voice audio is sent to Google servers."
+        )
     return _google_to_text(path, language)

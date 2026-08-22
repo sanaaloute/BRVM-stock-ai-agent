@@ -163,24 +163,32 @@ class SikaFinanceScraper(BaseScraper):
         if not HAS_PLAYWRIGHT:
             logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
             return None
+        browser = None
         try:
             self._sleep()
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page()
-                page.goto(SIKAFINANCE_PALMARES_URL, wait_until="networkidle", timeout=30000)
+                # networkidle tends to hit the 30s timeout on ad-heavy pages
+                page.goto(SIKAFINANCE_PALMARES_URL, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_selector("table", timeout=15000)
                 page.select_option("#dlSince", self._period_value)
                 submit = page.locator('button[type="submit"]').first
                 if submit.count() > 0:
                     submit.click()
                 page.wait_for_timeout(3000)
                 html = page.content()
-                browser.close()
             self._sleep()
             return html
         except Exception as e:
             logger.warning("Playwright fetch failed: %s", e)
             return None
+        finally:
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
 
     def scrape(self) -> dict[str, Any]:
         """Fetch and parse the BRVM palmarès table from Sika Finance."""
@@ -200,6 +208,13 @@ class SikaFinanceScraper(BaseScraper):
                 logger.warning("Playwright/requests fetch failed for period != veille. Falling back to Tavily.")
                 content = self.extract_content().replace("\xa0", "")
                 use_html_for_period = False
+                # Tavily returns the latest session (veille) table regardless of dlSince:
+                # stamp the actual period instead of the requested one.
+                out["period"] = "veille"
+                out["warning"] = (
+                    f"Période '{self._period_key}' indisponible (Playwright a échoué) : "
+                    "données de la dernière séance (veille)."
+                )
             else:
                 content = content.replace("\xa0", "")
         else:
@@ -295,6 +310,7 @@ class SikaFinanceScraper(BaseScraper):
             text = soup.get_text(separator="\n")
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             # Pattern: name, haut, bas, dernier, volume, var_jour%, var_period%
+            seen_names: set[str] = set()
             for line in lines:
                 # Match lines ending with two percentages
                 m = re.match(
@@ -302,18 +318,20 @@ class SikaFinanceScraper(BaseScraper):
                     line,
                 )
                 if m:
-                    name = m.group(0).strip()
-                    dernier = _parse_int(m.group(3))
-                    if name and dernier is not None:
+                    name = m.group(1).strip()
+                    dernier = _parse_int(m.group(4))
+                    # Dedupe by name: the site can render multiple matching tables
+                    if name and name not in seen_names and dernier is not None:
+                        seen_names.add(name)
                         out["brvm_stocks"].append({
                             "name": name,
                             "symbol": None,
-                            "haut": _parse_int(m.group(1)),
-                            "bas": _parse_int(m.group(2)),
+                            "haut": _parse_int(m.group(2)),
+                            "bas": _parse_int(m.group(3)),
                             "dernier": dernier,
-                            "volume": _parse_int(m.group(4)),
-                            "variation_jour_pct": _parse_float(m.group(5)),
-                            "variation_period_pct": _parse_float(m.group(6)),
+                            "volume": _parse_int(m.group(5)),
+                            "variation_jour_pct": _parse_float(m.group(6)),
+                            "variation_period_pct": _parse_float(m.group(7)),
                         })
 
         return out

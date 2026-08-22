@@ -22,6 +22,8 @@ def create_openrouter_llm(model: str | None = None, temperature: float = 0, **kw
         "base_url": "https://openrouter.ai/api/v1",
         "model": model_name,
         "temperature": temperature,
+        "timeout": config.LLM_REQUEST_TIMEOUT,
+        "max_retries": config.LLM_MAX_RETRIES,
         **kwargs,
     }
     default_headers: dict[str, str] = {}

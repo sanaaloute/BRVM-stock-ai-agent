@@ -18,7 +18,14 @@ from telegram.request import HTTPXRequest
 import config
 from .help import get_help_message
 from .voice_to_text import voice_to_text
-from app.utils.user_db import get_or_create_user, has_sent_help, mark_help_sent
+from app.utils.user_db import (
+    digest_get,
+    digest_set,
+    digest_unsubscribe,
+    get_or_create_user,
+    has_sent_help,
+    mark_help_sent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,10 +167,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(get_help_message())
         return
 
-    get_or_create_user(user_id)
-    if not has_sent_help(user_id):
+    # Sync SQLite/Postgres calls: keep them off the PTB event loop.
+    await asyncio.to_thread(get_or_create_user, user_id)
+    if not await asyncio.to_thread(has_sent_help, user_id):
         await update.message.reply_text(get_help_message())
-        mark_help_sent(user_id)
+        await asyncio.to_thread(mark_help_sent, user_id)
 
     status = await update.message.reply_text(f"{WAIT_SPINNER[0]} {WAIT_MESSAGE}\n\n⏱ 0s")
     updater_task: asyncio.Task | None = None
@@ -207,6 +215,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply = reply[: MAX_MESSAGE_LENGTH - 20] + "\n\n… (tronqué)"
 
     image_base64 = result.get("image_base64")
+    if not reply and not image_base64:
+        # Telegram rejects an empty edit_text (BadRequest): use a fallback.
+        reply = "Je n'ai pas pu générer de réponse. Réessayez dans un instant."
     if image_base64:
         caption = reply[:MAX_CAPTION_LENGTH] if len(reply) <= MAX_CAPTION_LENGTH else reply[: MAX_CAPTION_LENGTH - 20] + "\n… (tronqué)"
         await status.delete()
@@ -250,6 +261,41 @@ async def cmd_clearmemory(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as e:
         logger.warning("Clear memory failed for user %s: %s", user_id, e)
         await update.message.reply_text("Impossible d'effacer la mémoire. Vérifiez que l'API tourne et réessayez.")
+
+
+DIGEST_USAGE = (
+    "Résumé automatique du marché BRVM (scores et signaux du jour).\n"
+    "• /digest jour — résumé chaque jour de bourse, 18h GMT\n"
+    "• /digest semaine — résumé hebdomadaire, le vendredi\n"
+    "• /digest off — désactiver le résumé"
+)
+
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manage the scheduled market digest subscription (direct command, no LLM)."""
+    if not update.message or not update.effective_user:
+        return
+    user_id = update.effective_user.id
+    arg = context.args[0].strip().lower() if context.args else ""
+    try:
+        if arg in ("jour", "daily"):
+            result = await asyncio.to_thread(digest_set, user_id, "daily")
+        elif arg in ("semaine", "weekly"):
+            result = await asyncio.to_thread(digest_set, user_id, "weekly")
+        elif arg in ("off", "stop"):
+            result = await asyncio.to_thread(digest_unsubscribe, user_id)
+        else:
+            sub = await asyncio.to_thread(digest_get, user_id)
+            if sub and sub.get("enabled"):
+                freq_fr = "quotidien" if sub.get("frequency") == "daily" else "hebdomadaire"
+                await update.message.reply_text(f"Votre abonnement digest actuel : {freq_fr}.\n\n{DIGEST_USAGE}")
+            else:
+                await update.message.reply_text(f"Aucun abonnement digest actif.\n\n{DIGEST_USAGE}")
+            return
+        await update.message.reply_text(result.get("message") or result.get("error") or "Erreur inattendue, réessayez.")
+    except Exception as e:
+        logger.warning("Digest command failed for user %s: %s", user_id, e)
+        await update.message.reply_text("Impossible de mettre à jour l'abonnement digest. Réessayez dans un instant.")
 
 
 async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -299,6 +345,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clearmemory", cmd_clearmemory))
+    app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_handler(
         MessageHandler(
             (filters.TEXT & ~filters.COMMAND) | filters.VOICE | filters.AUDIO,
@@ -331,6 +378,8 @@ def run_polling_with_retry(
                 allowed_updates=allowed_updates,
                 bootstrap_retries=bootstrap_retries,
                 poll_interval=poll_interval,
+                # Don't replay the stale update backlog after a downtime.
+                drop_pending_updates=True,
             )
             break
         except RETRYABLE_ERRORS as e:
@@ -338,7 +387,8 @@ def run_polling_with_retry(
             if poll_retry_max and attempt > poll_retry_max:
                 logger.exception("Polling failed after %s attempts (network error). Giving up.", attempt)
                 raise
-            delay = poll_retry_delay * (poll_retry_backoff ** (attempt - 1))
+            # Cap the backoff so a long outage can't push retries to hours.
+            delay = min(poll_retry_delay * (poll_retry_backoff ** (attempt - 1)), 300.0)
             logger.warning(
                 "Polling stopped due to network error (%s). Restarting in %.1fs (attempt %s).",
                 e,

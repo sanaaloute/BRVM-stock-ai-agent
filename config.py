@@ -46,6 +46,16 @@ API_PORT = int(os.getenv("API_PORT", "8000").strip() or "8000")
 
 
 
+# Host interface the API port is published on (docker compose). Default localhost:
+
+# set API_BIND=0.0.0.0 only when the Meta WhatsApp webhook (or another external
+
+# client) must reach the API directly — and then API_SECRET_KEY is mandatory.
+
+API_BIND = os.getenv("API_BIND", "127.0.0.1").strip() or "127.0.0.1"
+
+
+
 BRVM_API_URL = os.getenv("BRVM_API_URL", f"http://localhost:{API_PORT}").rstrip("/")
 
 # Set BRVM_VERIFY_SSL=0 or false to skip SSL verification for brvm.org (e.g. certificate chain issues)
@@ -110,7 +120,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 
 
-# WhatsApp Business Cloud API channel. All three required to enable; the webhook
+# WhatsApp Business Cloud API channel. All four required to enable; the webhook
 
 # (GET/POST /whatsapp/webhook) must be reachable over public HTTPS from Meta.
 
@@ -120,7 +130,25 @@ WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
 
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
 
-WHATSAPP_ENABLED = bool(WHATSAPP_VERIFY_TOKEN and WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID)
+# Meta App Secret (Meta app > Settings > Basic). Used to verify the
+
+# X-Hub-Signature-256 HMAC on inbound webhooks — without it anyone who finds the
+
+# webhook URL can inject messages as any phone number, so the channel stays
+
+# disabled until it is set.
+
+WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET", "").strip()
+
+WHATSAPP_ENABLED = bool(WHATSAPP_VERIFY_TOKEN and WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_APP_SECRET)
+
+
+
+# Dedup window for delivered WhatsApp message ids (Meta retries delivery until
+
+# acked, sometimes long after). Default 24h.
+
+WHATSAPP_DEDUP_TTL_SECONDS = float(os.getenv("WHATSAPP_DEDUP_TTL_SECONDS", "86400"))
 
 
 
@@ -182,6 +210,18 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0").strip() or "0.0")
 
 
 
+# Per-request LLM timeout (seconds). Without one, a stalled provider can pin an
+
+# agent slot forever; LLM_MAX_RETRIES bounds client-level retries (the graph
+
+# adds at most one more attempt on transient errors).
+
+LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120").strip() or "120")
+
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1").strip() or "1")
+
+
+
 # Ollama
 
 OLLAMA_CLOUD_HOST = "https://ollama.com"
@@ -220,9 +260,11 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
 
 
-# Graph: max steps before stopping (prevents endless loops)
+# Graph: max steps before stopping (prevents endless loops; weak models looping
 
-RECURSION_LIMIT = int(os.getenv("RECURSION_LIMIT", "100").strip() or "100")
+# on a failing tool burn paid LLM calls at 100+)
+
+RECURSION_LIMIT = int(os.getenv("RECURSION_LIMIT", "30").strip() or "30")
 
 
 
@@ -254,3 +296,30 @@ OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "").strip() or None  # Op
 
 OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "").strip() or None  # Optional: X-OpenRouter-Title for rankings
 
+# Company details cache: entrypoint.sh re-runs run_company_details_fetch.py when
+
+# any file in $DATA_DIR/company_details/ is missing or older than this many days.
+
+COMPANY_DETAILS_REFRESH_DAYS = int(os.getenv("COMPANY_DETAILS_REFRESH_DAYS", "7").strip() or "7")
+
+
+
+# Scoring engine (app/services/scoring.py): block weights for the composite
+
+# 0-100 score. Technicals = trend/momentum/RSI/risk/volume from OHLCV history;
+
+# fundamentals = growth/PER-vs-median/dividend from the cached company fiches.
+
+SCORING_TECHNICAL_WEIGHT = float(os.getenv("SCORING_TECHNICAL_WEIGHT", "0.6").strip() or "0.6")
+
+SCORING_FUNDAMENTAL_WEIGHT = float(os.getenv("SCORING_FUNDAMENTAL_WEIGHT", "0.4").strip() or "0.4")
+
+
+
+# Telegram digest: scheduled buy/sell summary pushed to /digest subscribers.
+
+# Daily edition on weekdays, weekly on Friday, at DIGEST_HOUR_GMT (post-close).
+
+DIGEST_ENABLED = os.getenv("DIGEST_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+DIGEST_HOUR_GMT = int(os.getenv("DIGEST_HOUR_GMT", "18").strip() or "18")

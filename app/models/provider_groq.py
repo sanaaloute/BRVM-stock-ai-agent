@@ -21,5 +21,7 @@ def create_groq_llm(model: str | None = None, temperature: float = 0, **kwargs: 
         model=model_name,
         temperature=temperature,
         api_key=api_key,
+        timeout=config.LLM_REQUEST_TIMEOUT,
+        max_retries=config.LLM_MAX_RETRIES,
         **kwargs,
     )

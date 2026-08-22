@@ -35,7 +35,7 @@ def fetch_brvm_announcements(limit: int = 20, company_filter: str | None = None)
     try:
         if SLEEP > 0:
             time.sleep(SLEEP)
-        resp = http_get(ANNOUNCEMENTS_URL, timeout=30, headers={"User-Agent": USER_AGENT})
+        resp = http_get(ANNOUNCEMENTS_URL, timeout=30, headers={"User-Agent": USER_AGENT}, verify=config.BRVM_VERIFY_SSL)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
     except Exception as e:
@@ -50,7 +50,7 @@ def fetch_brvm_announcements(limit: int = 20, company_filter: str | None = None)
         header_text = (header.get_text() or "").upper() if header else ""
         if "DATE" not in header_text or "SOCIÉTÉ" not in header_text and "SOCIETE" not in header_text:
             continue
-        for row in rows[1:limit + 1]:
+        for row in rows[1:]:
             cells = row.find_all("td")
             if len(cells) < 3:
                 continue
@@ -75,4 +75,6 @@ def fetch_brvm_announcements(limit: int = 20, company_filter: str | None = None)
             })
         break
 
+    # Limit applied after the company filter, not before
+    out["items"] = out["items"][:limit]
     return out

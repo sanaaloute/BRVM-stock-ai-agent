@@ -86,20 +86,20 @@ class PlotCompanyChartInput(BaseModel):
 
 class GetCompanyNewsInput(BaseModel):
     symbol: str = Field(description="Stock symbol or company name (e.g. PALC, Palm CI).")
-    limit: int = Field(default=10, description="Max number of news items to return.")
+    limit: int = Field(default=10, le=50, description="Max number of news items to return.")
 
 
 class GetMarketNewsInput(BaseModel):
-    limit: int = Field(default=15, description="Max number of news items to return.")
+    limit: int = Field(default=15, le=50, description="Max number of news items to return.")
 
 
 class GetBrvmAnnouncementsInput(BaseModel):
-    limit: int = Field(default=15, description="Max number of announcements to return.")
+    limit: int = Field(default=15, le=50, description="Max number of announcements to return.")
     company: str | None = Field(default=None, description="Optional: filter by symbol or company name.")
 
 
 class GetMarketOverviewInput(BaseModel):
-    top_n: int = Field(default=10, description="Number of stocks to return per category (default 10).")
+    top_n: int = Field(default=10, le=50, description="Number of stocks to return per category (default 10).")
 
 
 class GetBrvmBasicsInput(BaseModel):
@@ -157,11 +157,11 @@ class GetTargetsInput(BaseModel):
 
 # News tools (news_tools.py)
 class GetSikafinanceActualitesInput(BaseModel):
-    limit: int = Field(default=20, description="Max number of news items to return.")
+    limit: int = Field(default=20, le=50, description="Max number of news items to return.")
 
 
 class GetSikafinanceCommuniquesInput(BaseModel):
-    limit: int = Field(default=20, description="Max number of communiqués to return.")
+    limit: int = Field(default=20, le=50, description="Max number of communiqués to return.")
     company: str | None = Field(default=None, description="Optional: filter by symbol or company name.")
 
 
@@ -170,20 +170,20 @@ class GetRichboursePredictionInput(BaseModel):
 
 
 class GetRichbourseDividendsInput(BaseModel):
-    limit: int = Field(default=50, description="Max number of dividend entries to return.")
+    limit: int = Field(default=50, le=50, description="Max number of dividend entries to return.")
     symbol: str | None = Field(default=None, description="Optional: filter by symbol or company name.")
 
 
 # Prediction/trends tools (prediction_tools.py)
 class GetAllTrendsInput(BaseModel):
-    limit: int = Field(default=100, description="Max number of stocks to return from the full trends table.")
+    limit: int = Field(default=100, le=200, description="Max number of stocks to return from the full trends table.")
 
 
 class GetTrendsByOptionInput(BaseModel):
     trend_option: str = Field(
         description="Filter by trend: hausse (up), baisse (down), or neutre (neutral).",
     )
-    limit: int = Field(default=100, description="Max number of stocks to return.")
+    limit: int = Field(default=100, le=200, description="Max number of stocks to return.")
 
 
 class GetStockPredictionDetailInput(BaseModel):
@@ -221,3 +221,16 @@ class FetchCompanyDetailsInput(BaseModel):
     symbol: str = Field(
         description="BRVM symbol to fetch from Sika Finance and save to cache (e.g. BOAM, NTLC). Call only when get_company_details returned no_local_data or the user explicitly asks to refresh company details.",
     )
+
+
+# Advisor tools (advisor_tools.py)
+class GetStockAdviceInput(BaseModel):
+    symbol: str = Field(description="BRVM symbol (e.g. NTLC, SLBC) to score for a buy/hold/sell signal.")
+
+
+class GetMarketRecommendationsInput(BaseModel):
+    top_n: int = Field(default=5, le=10, description="Number of top buy and top sell candidates to return (max 10).")
+
+
+class GetPortfolioAdviceInput(BaseModel):
+    pass

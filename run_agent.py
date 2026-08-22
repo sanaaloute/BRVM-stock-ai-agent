@@ -36,11 +36,16 @@ def main() -> int:
         from langgraph.checkpoint.sqlite import SqliteSaver
         with SqliteSaver.from_conn_string(str(CHAT_MEMORY_DB)) as checkpointer:
             result = run_agent(text, model=model, thread_id="cli", checkpointer=checkpointer)
-    messages = result.get("messages") or []
-    for m in messages:
-        if hasattr(m, "content") and m.content:
-            role = getattr(m, "type", "message")
-            print(f"\n[{role}]\n{m.content}")
+    reply = result.get("_fresh_reply") or result.get("clarification")
+    if reply:
+        print(f"\n[assistant]\n{reply}")
+    else:
+        # Fallback for older run_agent results: print the full transcript.
+        messages = result.get("messages") or []
+        for m in messages:
+            if hasattr(m, "content") and m.content:
+                role = getattr(m, "type", "message")
+                print(f"\n[{role}]\n{m.content}")
     return 0
 
 

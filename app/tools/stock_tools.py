@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.tools import StructuredTool  # pyright: ignore[reportMissingImports]
 
@@ -194,12 +196,57 @@ def _fetch_sgi_data(**kwargs: Any) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+# fetch_sgi_url SSRF guard: the URL comes from the LLM, so only known BRVM-data
+# hosts may be fetched — the static set below plus any host referenced by the
+# local SGI data file (websites and detail/tarifs/documents links).
+_SGI_URL_ALLOWED_HOSTS = {
+    "richbourse.com",
+    "www.richbourse.com",
+    "sikafinance.com",
+    "www.sikafinance.com",
+    "brvm.org",
+    "www.brvm.org",
+}
+_SGI_URL_FIELDS = ("website", "detail_url", "tarifs_url", "documents_url")
+_IP_LITERAL_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+
+
+def _sgi_url_host(url: str) -> str:
+    """Lowercased host without credentials or port ("" when unparseable)."""
+    netloc = (urlparse(url).netloc or "").lower()
+    return netloc.split("@")[-1].split(":")[0]
+
+
+def _sgi_allowed_hosts() -> set[str]:
+    hosts = set(_SGI_URL_ALLOWED_HOSTS)
+    try:
+        data = load_sgi_local()
+        for entry in data.get("sgi") or []:
+            if not isinstance(entry, dict):
+                continue
+            for field in _SGI_URL_FIELDS:
+                host = _sgi_url_host(str(entry.get(field) or "").strip())
+                if host:
+                    hosts.add(host)
+    except Exception:
+        pass  # missing/corrupt SGI file: the static allowlist still applies
+    return hosts
+
+
 def _fetch_sgi_url(url: str, **kwargs: Any) -> str:
     """Fetch content from a URL (e.g. SGI detail page, tarifs, or website). Returns text summary or error."""
     from app.utils.http_client import http_get
     url = (url or "").strip()
-    if not url or not url.startswith("http"):
+    parsed = urlparse(url)
+    host = _sgi_url_host(url)
+    if parsed.scheme not in ("http", "https") or not host:
         return json.dumps({"error": "URL invalide."}, ensure_ascii=False)
+    if _IP_LITERAL_RE.match(host) or "localhost" in host:
+        return json.dumps({"error": f"Hôte non autorisé : {host}."}, ensure_ascii=False)
+    if host not in _sgi_allowed_hosts():
+        return json.dumps({
+            "error": f"Hôte non autorisé : {host}. Seuls les sites de données BRVM connus (Rich Bourse, Sika Finance, BRVM, sites SGI) peuvent être consultés.",
+        }, ensure_ascii=False)
     try:
         resp = http_get(url, timeout=15, verify=True)
         resp.raise_for_status()

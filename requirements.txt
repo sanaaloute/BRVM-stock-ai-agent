@@ -16,6 +16,9 @@ langgraph-checkpoint-sqlite==3.1.0
 psycopg[binary,pool]==3.3.4
 langgraph-checkpoint-postgres==3.1.0
 pydantic==2.13.4
+# Persistence ORM + schema migrations (user DB, SQLite and PostgreSQL)
+sqlalchemy==2.0.52
+alembic==1.19.1
 # Charts
 matplotlib==3.11.0
 numpy==2.4.2

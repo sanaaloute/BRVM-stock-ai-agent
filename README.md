@@ -2,14 +2,14 @@
 
 ## Project objective
 
-Scrape and query BRVM (Bourse Régionale des Valeurs Mobilières) / West African stock data. A LangGraph agent (NLU → supervisor → 9 workers) coordinates scrapers (Sika Finance, Rich Bourse, BRVM) and analytics workers to answer natural-language questions via CLI, Telegram, or WhatsApp. Supports portfolio tracking, price alerts, predictions/trends, SGI (broker) info and company fiches.
+Scrape and query BRVM (Bourse Régionale des Valeurs Mobilières) / West African stock data. A LangGraph agent (NLU → supervisor → 10 workers) coordinates scrapers (Sika Finance, Rich Bourse, BRVM) and analytics workers to answer natural-language questions via CLI, Telegram, or WhatsApp. Supports portfolio tracking, price alerts, predictions/trends, SGI (broker) info, company fiches and deterministic investment advice.
 
 ## Project tree
 
 ```
 RealTimeStock/
 ├── app/
-│   ├── agents/           # LangGraph: NLU, supervisor, 9 workers, state
+│   ├── agents/           # LangGraph: NLU, supervisor, 10 workers, state
 │   │   ├── graph.py             # master graph (cached compile, multi-worker routing)
 │   │   ├── nlu_agent.py
 │   │   ├── scraper_agent.py
@@ -21,6 +21,7 @@ RealTimeStock/
 │   │   ├── prediction_agent.py
 │   │   ├── sgi_agent.py
 │   │   ├── company_details_agent.py
+│   │   ├── advisor_agent.py     # investment advice (deterministic scoring engine)
 │   │   ├── state.py
 │   │   └── utils.py
 │   ├── api/
@@ -31,9 +32,12 @@ RealTimeStock/
 │   ├── channels/
 │   │   └── whatsapp/     # WhatsApp via Evolution API (webhook, client, service)
 │   ├── data/             # BRVM_Companies.xlsx, company_details/, series/ (runtime CSVs)
+│   ├── db/               # SQLAlchemy engine/session + Alembic migrations (user data)
 │   ├── scrapers/         # Rich Bourse, Sika Finance, BRVM.org (+ dividends, trends, SGI)
 │   ├── services/
-│   │   └── chat_service.py  # Channel-agnostic entry to the AI pipeline
+│   │   ├── chat_service.py  # Channel-agnostic entry to the AI pipeline
+│   │   ├── scoring.py       # Deterministic 0-100 scoring engine (advisor)
+│   │   └── digest.py        # Scheduled digest composition + job body
 │   ├── tools/            # LangChain tools + pydantic schemas
 │   └── utils/            # Services (metrics, news, plots, cache, user_db, ...)
 ├── config.py
@@ -43,7 +47,10 @@ RealTimeStock/
 ├── run_telegram_bot.py   # Bot only (requires API)
 ├── run_scrapers.py
 ├── run_sgi_fetch.py      # Refresh SGI list into app/data/sgi_brvm.json
+├── run_migrations.py     # Apply Alembic migrations (native; the Docker entrypoint runs it too)
+├── run_company_details_fetch.py  # Refresh Sika Finance company fiches (fundamentals cache)
 ├── tests/                # Offline test suites (see below)
+├── scripts/              # backup.sh — production backups (see "Production hardening")
 ├── requirements.txt
 ├── requirements-docker.txt
 ├── .env.example
@@ -59,6 +66,10 @@ RealTimeStock/
    pip install -r requirements.txt
    playwright install chromium
    ```
+
+   Voice notes: the Google Speech fallback (pydub) shells out to ffmpeg — install
+   it natively (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on
+   Debian/Ubuntu). The Docker image already bundles it.
 
 2. **Configure environment**
 
@@ -101,7 +112,7 @@ RealTimeStock/
    **WhatsApp channel** (WhatsApp Business Cloud API — served by the same Chat API, no extra process):
 
    1. Create a Meta app at [developers.facebook.com](https://developers.facebook.com), add the **WhatsApp** product, and note the *phone number ID* and a *permanent access token* (System User token).
-   2. Set `WHATSAPP_VERIFY_TOKEN` (any secret you choose), `WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` in `.env`.
+   2. Set `WHATSAPP_VERIFY_TOKEN` (any secret you choose), `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_APP_SECRET` (Meta app → Settings → Basic → App Secret — verifies the `X-Hub-Signature-256` HMAC on inbound webhooks; the channel stays disabled without it) in `.env`.
    3. In the Meta app, configure the webhook: URL `https://<your-api-host>/whatsapp/webhook`, verify token = your `WHATSAPP_VERIFY_TOKEN`, subscribe to the `messages` field. The API must be reachable over **public HTTPS** (reverse proxy, or a tunnel like ngrok for dev).
 
    WhatsApp users share the Telegram pipeline: same agent, same free daily quota (metered as `wa:<phone>`), same per-user memory. Text in, text out; charts are sent as images. Voice/images on WhatsApp and portfolio/tracking/alerts on WhatsApp are not supported yet.
@@ -127,13 +138,15 @@ RealTimeStock/
 
    Text and voice notes (transcribed like Telegram) are supported; charts are sent as images. Users are metered as `wa:<phone>` with per-user conversation memory, identical to the Meta channel.
 
-   **EC2 / production notes** (Evolution channel):
+   **Production notes (Mac mini / Apple Silicon + EC2)** (Evolution channel):
 
-   - Unlike the Meta Cloud API, **no public HTTPS endpoint is needed**: Evolution connects *outbound* to WhatsApp, and the webhook travels `evolution → api` inside the compose network. The EC2 security group only needs SSH (port 22).
+   - **Apple Silicon runs natively**: every image in the stack — the pinned Playwright base (`mcr.microsoft.com/playwright/python:v1.49.0-noble`), `postgres:16-alpine`, `alpine` — has a `linux/arm64` manifest, so a Mac mini builds and runs the stack without emulation. One caveat: pull-test the Evolution image on the target host first (`docker pull evoapicloud/evolution-api:v2.3.7`) — its arm64 build is community-verified rather than officially supported.
+   - **Auto-start on the Mac mini**: enable Docker Desktop → Settings → General → "Start Docker Desktop when you sign in", and turn on macOS automatic login for the service user, so the stack comes back after a reboot or power cut. (Alternative: run the Docker daemon natively under launchd instead of Docker Desktop.)
+   - Unlike the Meta Cloud API, **no public HTTPS endpoint is needed**: Evolution connects *outbound* to WhatsApp, and the webhook travels `evolution → api` inside the compose network. On EC2 the security group only needs SSH (port 22).
    - Evolution's port `8080` is bound to `127.0.0.1` in the compose file. For the one-time admin steps (QR pairing, webhook setup), open an SSH tunnel from your machine and run the curls against it:
-     `ssh -L 8080:localhost:8080 ec2-user@<ec2-ip>` (or the Session Manager port-forwarding equivalent).
-   - Use an **x86_64 (amd64)** instance type — the Playwright base image is amd64-oriented (Graviton/arm64 is untested). Size: `t3.medium` (4 GB) minimum — the LLM runs on Ollama Cloud, so no GPU or extra RAM for local models is needed.
-   - The api port `8000` is published as before; keep the security group closed on it unless you also use the Meta webhook or external health checks (the Evolution channel does not need it).
+     `ssh -L 8080:localhost:8080 <user>@<host>` (on EC2: `ec2-user@<ec2-ip>`, or the Session Manager port-forwarding equivalent).
+   - On EC2, use an **x86_64 (amd64)** instance — `t3.medium` (4 GB) minimum; the LLM runs on Ollama Cloud, so no GPU or extra RAM for local models is needed.
+   - The api port `8000` is published on localhost by default (`API_BIND`, see *Production hardening* below); keep the security group closed on it unless you also use the Meta webhook or external health checks (the Evolution channel does not need it).
 
 4. **Tuning (optional, see `.env.example`)**
 
@@ -142,8 +155,10 @@ RealTimeStock/
    - `API_SECRET_KEY` — **required for production**. The bot must send this shared secret as the `X-API-Key` header; the API rejects unauthenticated calls with 401. If empty, the API runs in dev mode (no auth). Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
    - `RATE_LIMIT_PER_MINUTE` (default `30`) — per-user request limit on `/chat` (0 disables).
    - `DAILY_FREE_QUOTA` (default `30`) — free requests per user per day; over-quota users get a friendly "come back tomorrow" reply. Failed requests are refunded; `QUOTA_EXEMPT_IDS` (comma-separated user ids) bypass the limit. Persisted in SQLite, so restarts don't reset it.
-   - `DATABASE_URL` — user data (portfolio, tracking, targets, quota) and chat checkpoints. Empty = local SQLite files in `app/data/` (zero config). Set `postgresql://user:password@host:5432/dbname` for PostgreSQL in production (docker compose wires this automatically via `POSTGRES_PASSWORD`).
-   - `RECURSION_LIMIT` (default `100`) — max agent steps before a partial answer is returned.
+   - **Persistence** (`DATABASE_URL`) — user data (portfolio, tracking, targets, quota, digest subscriptions, score snapshots) and chat checkpoints are backed by SQLAlchemy, with the schema managed by Alembic (`app/db/migrations/`). Empty = local SQLite files in `app/data/` — the zero-config dev default. Set `postgresql://user:password@host:5432/dbname` for PostgreSQL in production (docker compose wires this automatically via `POSTGRES_PASSWORD`). Migrations are applied automatically in Docker (the entrypoint runs them before boot; a schema failure blocks startup) or natively with `python run_migrations.py`.
+     **Local → cloud migration**: point `DATABASE_URL` at the cloud Postgres, run `python run_migrations.py` (creates/adopts the schema — the initial migration adopts legacy tables in place and never drops them), then restore a plain-SQL dump in the `scripts/backup.sh` format: `pg_dump -U <user> -d <db> > postgres.sql` on the source, `psql "$DATABASE_URL" -f postgres.sql` on the target. There is no SQLite → Postgres data migrator: dev data stays local, production starts fresh (users re-enter portfolios via the bot).
+   - `RECURSION_LIMIT` (default `30`) — max agent steps before a partial answer is returned; a weak model looping on a failing tool otherwise burns paid LLM calls.
+   - `LLM_REQUEST_TIMEOUT` (default `120` seconds) and `LLM_MAX_RETRIES` (default `1`) — per-request LLM timeout and client-level retry bounds, so a stalled or flaky provider can't pin an agent slot forever (the graph adds at most one more attempt on transient errors).
    - Chat memory: checkpoints live in `app/data/chat_memory.db`, condensed to the last user/answer pairs per thread (`MEMORY_MAX_MESSAGES`, default `20`). Conversations persist across turns so follow-up questions work; threads inactive for more than `MEMORY_TTL_HOURS` (default `24`, `0` = never) are wiped automatically (`MEMORY_CLEANUP_INTERVAL_SEC`, default `3600`). `/clearmemory` clears one user's thread on demand.
 
    Security notes: portfolio/tracking/alert tools never receive a user id from the model — the identity is injected server-side from the verified chat context, so one user cannot access another user's data. Every reply carries an AI-generated disclaimer. User databases (`app/data/*.db`) are git-ignored and must not be committed.
@@ -163,6 +178,10 @@ RealTimeStock/
    python tests/test_graph_e2e.py           # full graph with fake LLM (needs full deps)
    python tests/test_conversation_memory.py # multi-turn memory: clarification persistence, NLU context, TTL cleanup
    python tests/test_postgres_backend.py    # SQL translation always; full PG run when TEST_DATABASE_URL is set
+   python tests/test_scoring.py             # deterministic scoring engine: signals, blocks, batch mode (needs full deps)
+   python tests/test_advisor_graph.py       # advisor worker routing + tool shapes, fake LLM (needs full deps)
+   python tests/test_ohlcv_series.py        # OHLCV Highcharts extraction + CSV round-trip, offline (needs full deps)
+   python tests/test_digest.py              # digest subscriptions, composition and job body, temp SQLite (needs full deps)
    ```
 
    PostgreSQL integration check: `docker compose up -d db`, then
@@ -196,3 +215,75 @@ RealTimeStock/
    `bot_data` volume (no manual `run_sgi_fetch.py` step) and refreshes it when older
    than `SGI_REFRESH_DAYS` (default 7). A manual refresh is one command away:
    `docker compose exec api python run_sgi_fetch.py`.
+
+## Investment advice (advisor + digest)
+
+The agent answers buy/sell/hold questions through its own ADVISOR worker,
+powered by a deterministic scoring engine (`app/services/scoring.py`, pure
+Python — no LLM, no invented numbers):
+
+- **Market-wide picks** — « Quelles actions acheter ? », « Top actions BRVM », « Quelles actions vendre/alléger ? »
+- **Single stock** — « Faut-il vendre NTLC ? », « Avis sur SLBC », « Garder ou vendre X ? »
+- **Portfolio advice** — « Conseil sur mon portefeuille » scores each of your positions (Telegram; the verified identity is injected server-side, like the other portfolio tools).
+
+**How the score is computed**: `0.6 × technicals + 0.4 × fundamentals` → 0-100
+→ French signal: **Achat** (≥ 70), **Accumuler** (≥ 55), **Neutre** (≥ 40),
+**Alléger** (< 40).
+
+- Technicals: trend (price vs MM50/MM200), momentum (3/6/12-month returns), RSI(14), risk (20-day volatility, 1-year max drawdown), volume trend.
+- Fundamentals: growth (résultat net + chiffre d'affaires, YoY), valuation (PER vs the BRVM median PER), dividend yield.
+
+**Data sources**: daily OHLCV price history scraped from the Rich Bourse chart
+pages (`app/data/series/*.csv`, refreshed daily by the timeseries job) and
+annual fundamentals from the Sika Finance company fiches
+(`app/data/company_details/*.json`, refreshed weekly). The engine only reads
+local caches — `score_all` never live-scrapes.
+
+**Limitations (honest)**: no debt or balance-sheet data (not published in a
+scrapeable form); fundamentals are annual only, so they lag; the score is a
+screening aid, not a crystal ball. Every advice reply and every digest ends
+with a disclaimer — this is **not** personalized financial advice.
+
+**Telegram digest** — a scheduled market summary pushed to subscribers:
+`/digest jour` (each trading day), `/digest semaine` (weekly), `/digest off`.
+Jobs run on weekdays at 18:00 GMT (post-close); the weekly edition goes out
+with the Friday daily. Each run scores the whole market once, persists the
+snapshots (that is what powers the day-over-day signal changes in "Vos
+positions"), then sends the top buy / watch candidates plus the signal changes
+of your own portfolio and tracking symbols.
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `DIGEST_ENABLED` | `true` | Master switch for the scheduled digest jobs |
+| `DIGEST_HOUR_GMT` | `18` | Send time (weekdays), GMT — Abidjan trades on GMT |
+| `SCORING_TECHNICAL_WEIGHT` | `0.6` | Weight of the technical block in the 0-100 score |
+| `SCORING_FUNDAMENTAL_WEIGHT` | `0.4` | Weight of the fundamental block in the 0-100 score |
+| `COMPANY_DETAILS_REFRESH_DAYS` | `7` | Max age of the company fiches before re-fetch (entrypoint) |
+
+## Production hardening
+
+- **API binding** — the api port is published on `127.0.0.1` by default (`API_BIND`). Set `API_BIND=0.0.0.0` in `.env` only when the Meta WhatsApp webhook (or another external client) must reach the API directly — and then `API_SECRET_KEY` is mandatory. The Telegram bot (outbound polling) and the Evolution gateway (compose network) never need a public port.
+- **`API_SECRET_KEY`** — mandatory in production: without it the API runs in dev mode with no authentication (see *Tuning* above).
+- **`WHATSAPP_APP_SECRET`** — required for the Meta WhatsApp channel (Meta app → Settings → Basic → App Secret). It verifies the `X-Hub-Signature-256` HMAC on inbound webhooks; the channel stays disabled until it is set.
+- **`POSTGRES_PASSWORD`** — no default: `docker compose` fails fast with a clear message until it is set in `.env` (see `.env.example`).
+- **Time zone** — `TZ=Africa/Abidjan` is set on the api and bot services (BRVM trades on GMT), so date cutoffs, daily quotas and cache staleness follow the market. Override `TZ` in `.env`.
+- **Agent cost safeguards** — `RECURSION_LIMIT` (default `30`) caps agent steps before a partial answer is returned; `LLM_REQUEST_TIMEOUT` (default `120` s) and `LLM_MAX_RETRIES` (default `1`) bound stalled or flaky LLM calls.
+- **Log rotation** — every compose service caps Docker's json-file logs (`10m` × 5 files), so container logs can't fill the disk of an always-on host.
+- **Non-root containers** — the api/bot image runs as an unprivileged `bot` user; only `/app/app/data` (volume) and the whisper cache are writable.
+- **Backups** — `scripts/backup.sh` dumps both Postgres databases and tars the `bot_data` / `evolution_data` volumes into `./backups/<timestamp>/`, pruning backups older than 14 days (override the destination with `BACKUP_DIR`). Schedule it with cron on the Mac mini:
+
+  ```cron
+  17 3 * * * cd /path/to/BRVM-stock-ai-agent && ./scripts/backup.sh >> backups/cron.log 2>&1
+  ```
+
+  Restore — databases into the running `db` service, volumes with the stack stopped:
+
+  ```bash
+  cat backups/<ts>/postgres.sql  | docker compose exec -T db psql -U brvm -d brvm
+  cat backups/<ts>/evolution.sql | docker compose exec -T db psql -U brvm -d evolution
+  docker run --rm -v <project>_bot_data:/data -v "$PWD/backups/<ts>":/backup alpine sh -c "tar xzf /backup/bot_data.tar.gz -C /data"
+  docker run --rm -v <project>_evolution_data:/data -v "$PWD/backups/<ts>":/backup alpine sh -c "tar xzf /backup/evolution_data.tar.gz -C /data"
+  ```
+
+  `<project>` is the compose project name (the directory name by default — check with `docker volume ls`). Restoring a dump into an existing database can conflict with rows that are already there; for a clean recovery, restore into a freshly initialized database/volume.
+- **External watchdog** — point a monitoring service (e.g. healthchecks.io) at the api's `/health` endpoint, and its cron monitoring at the backup job, so a dead stack or a missed backup alerts you.

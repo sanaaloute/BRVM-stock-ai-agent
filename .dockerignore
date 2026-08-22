@@ -11,6 +11,9 @@
 .env.*
 !.env.example
 
+# Private keys / certificates
+*.pem
+
 # Python
 __pycache__
 *.py[cod]

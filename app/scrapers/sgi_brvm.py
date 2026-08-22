@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -211,20 +212,20 @@ def fetch_all_sgi_richbourse() -> list[dict[str, Any]]:
 
 
 def _country_to_code(country: str) -> str:
-    """Map country name to 2-letter code."""
+    """Map country name to 2-letter lowercase ISO code (matches brvm_companies codes)."""
     m = {
-        "bénin": "BN",
-        "benin": "BN",
-        "burkina faso": "BF",
-        "côte d'ivoire": "CI",
-        "cote d'ivoire": "CI",
-        "guinée-bissau": "GW",
-        "guinee-bissau": "GW",
-        "mali": "ML",
-        "niger": "NE",
-        "sénégal": "SN",
-        "senegal": "SN",
-        "togo": "TG",
+        "bénin": "bj",
+        "benin": "bj",
+        "burkina faso": "bf",
+        "côte d'ivoire": "ci",
+        "cote d'ivoire": "ci",
+        "guinée-bissau": "gw",
+        "guinee-bissau": "gw",
+        "mali": "ml",
+        "niger": "ne",
+        "sénégal": "sn",
+        "senegal": "sn",
+        "togo": "tg",
     }
     key = (country or "").strip().lower()
     return m.get(key, "")
@@ -246,8 +247,16 @@ def fetch_and_save_sgi(save_path: Path | None = None) -> dict[str, Any]:
         "count": len(sgi_list),
         "sgi": sgi_list,
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     logger.info("SGI data saved: %s (%d brokers)", path, len(sgi_list))
     return {
@@ -261,5 +270,9 @@ def load_sgi_local(path: Path | None = None) -> dict[str, Any]:
     p = path or SGI_JSON_PATH
     if not Path(p).exists():
         return {"sgi": [], "count": 0, "updated_at": None}
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Could not load SGI data from %s: %s", p, e)
+        return {"sgi": [], "count": 0, "updated_at": None}

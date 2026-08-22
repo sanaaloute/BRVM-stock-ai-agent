@@ -3,12 +3,16 @@ Rich Bourse time-series scraper: fetch chart data (Highcharts) for a symbol and 
 
 URL: https://www.richbourse.com/common/mouvements/index/{symbol}
 CSV: data/series/{symbol}_{min_date}_{max_date}.csv
+Columns: Date,Price,Open,High,Low,Volume (Price = close; Open/High/Low/Volume
+empty when the page exposes no OHLC/volume series).
 """
 import csv
 import json
 import logging
+import os
 import re
-from datetime import datetime
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +32,70 @@ def extract_highcharts_series(html: str) -> list[list[int | float]] | None:
     if not match:
         return None
     return json.loads(match.group(1))
+
+
+def extract_highcharts_ohlcv(html: str) -> dict[str, Any] | None:
+    """Extract the richest OHLCV series from all Highcharts data arrays on the page.
+
+    The mouvements page embeds several charts (line, OHLC, candlestick), each with
+    a price series immediately followed by a volume series (``name: "Volume"`` in
+    the ~300 chars preceding the data array). Price points are either
+    ``[ts_ms, close]`` or ``[ts_ms, open, high, low, close]``.
+
+    Returns ``{"points": [...], "volumes": [...] | None}``: points is the first
+    5-element (OHLC) price series found, else the first 2-element (close-only)
+    one; volumes is the nearest volume series after it on the page, dropped when
+    it does not align with the price points (same count, same first timestamp).
+    Falls back to the first data array (close only) when no series could be
+    classified. None when the page has no usable data array at all.
+    """
+    pattern = r"\?\s*(\[\[.*?\]\])\s*:"
+    candidates: list[tuple[list, bool]] = []  # (data array, is_volume)
+    for match in re.finditer(pattern, html, re.DOTALL):
+        try:
+            data = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if not isinstance(data, list) or not data:
+            continue
+        context = html[max(0, match.start() - 300):match.start()]
+        candidates.append((data, 'name: "Volume"' in context))
+    if not candidates:
+        return None
+
+    def point_arity(data: list) -> int:
+        for point in data:
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                return len(point)
+        return 0
+
+    price_idx: int | None = None
+    for wanted in (5, 2):  # prefer OHLC points, fall back to close-only
+        for i, (data, is_volume) in enumerate(candidates):
+            if not is_volume and point_arity(data) == wanted:
+                price_idx = i
+                break
+        if price_idx is not None:
+            break
+
+    if price_idx is None:
+        # Classification found nothing: legacy behavior (first array, close only).
+        return {"points": candidates[0][0], "volumes": None}
+
+    points = candidates[price_idx][0]
+    volumes = None
+    for data, is_volume in candidates[price_idx + 1:]:
+        if not is_volume:
+            continue
+        first_price = next((p for p in points if isinstance(p, (list, tuple)) and p), None)
+        first_vol = next((p for p in data if isinstance(p, (list, tuple)) and p), None)
+        if (
+            first_price is not None and first_vol is not None
+            and len(data) == len(points) and first_vol[0] == first_price[0]
+        ):
+            volumes = data
+        break  # nearest volume series only; drop it rather than misalign
+    return {"points": points, "volumes": volumes}
 
 
 class RichBourseTimeseriesScraper(BaseScraper):
@@ -78,18 +146,33 @@ class RichBourseTimeseriesScraper(BaseScraper):
             out["error"] = str(e)
             return out
 
-        series = extract_highcharts_series(html)
-        if not series:
+        extracted = extract_highcharts_ohlcv(html)
+        if not extracted or not extracted.get("points"):
             out["error"] = "Aucune série Highcharts trouvée."
             return out
 
+        points = extracted["points"]
+        volume_by_ts: dict[Any, Any] = {}
+        for item in extracted.get("volumes") or []:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                volume_by_ts[item[0]] = item[1]
+
         records = []
-        for item in series:
-            if not isinstance(item, (list, tuple)) or len(item) != 2:
+        for item in points:
+            if not isinstance(item, (list, tuple)) or len(item) not in (2, 5):
                 continue
-            timestamp_ms, price = item
-            dt = datetime.fromtimestamp(timestamp_ms / 1000)
-            records.append({"date": dt, "price": price})
+            timestamp_ms = item[0]
+            # Highcharts timestamps are UTC milliseconds
+            dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            if len(item) == 5:  # [ts_ms, open, high, low, close]
+                record = {
+                    "date": dt, "price": item[4],
+                    "open": item[1], "high": item[2], "low": item[3],
+                }
+            else:  # [ts_ms, close]
+                record = {"date": dt, "price": item[1], "open": None, "high": None, "low": None}
+            record["volume"] = volume_by_ts.get(timestamp_ms)
+            records.append(record)
 
         records.sort(key=lambda r: r["date"])
         if not records:
@@ -104,22 +187,50 @@ class RichBourseTimeseriesScraper(BaseScraper):
         out["rows"] = len(records)
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
-        # Remove any existing CSV files for this symbol so only the latest remains
+
+        filename = f"{self._symbol}_{min_str}_{max_str}.csv"
+        csv_path = self._output_dir / filename
+
+        # Write to a temp file in the same dir, then atomically move into place,
+        # so a concurrent reader never sees a missing or half-written CSV.
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", newline="", encoding="utf-8",
+                dir=self._output_dir, prefix=f".{self._symbol}_", suffix=".tmp",
+                delete=False,
+            ) as f:
+                tmp_path = Path(f.name)
+                w = csv.DictWriter(f, fieldnames=["Date", "Price", "Open", "High", "Low", "Volume"])
+                w.writeheader()
+                for r in records:
+                    w.writerow({
+                        "Date": r["date"].strftime("%Y-%m-%d %H:%M:%S"),
+                        "Price": r["price"],
+                        "Open": r["open"] if r["open"] is not None else "",
+                        "High": r["high"] if r["high"] is not None else "",
+                        "Low": r["low"] if r["low"] is not None else "",
+                        "Volume": r["volume"] if r["volume"] is not None else "",
+                    })
+            os.replace(tmp_path, csv_path)
+            tmp_path = None
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        # Remove any old CSV files for this symbol (after the new one is in place)
+        # so only the latest remains
         for old_path in self._output_dir.glob(f"{self._symbol}_*.csv"):
+            if old_path.name == filename:
+                continue
             try:
                 old_path.unlink(missing_ok=True)
                 logger.debug("Removed old series CSV: %s", old_path.name)
             except OSError as e:
                 logger.warning("Could not remove old CSV %s: %s", old_path, e)
-
-        filename = f"{self._symbol}_{min_str}_{max_str}.csv"
-        csv_path = self._output_dir / filename
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["Date", "Price"])
-            w.writeheader()
-            for r in records:
-                w.writerow({"Date": r["date"].strftime("%Y-%m-%d %H:%M:%S"), "Price": r["price"]})
 
         out["csv_path"] = str(csv_path)
         return out

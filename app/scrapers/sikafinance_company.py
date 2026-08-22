@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -27,6 +28,13 @@ SLEEP = getattr(config, "SLEEP_SECONDS", 2)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "company_details"
+
+# Lines starting with these labels are fields of their own, not dirigeant names:
+# they end the "Dirigeants :" continuation block.
+_DIRIGEANTS_STOP_PREFIXES = (
+    "Téléphone :", "Fax :", "Adresse :", "Nombre de titres :", "Flottant :",
+    "Valorisation", "Principaux actionnaires",
+)
 
 
 def _normalize(s: str) -> str:
@@ -109,7 +117,11 @@ def fetch_company_page(symbol: str, country_code: str) -> dict[str, Any]:
         elif ln.startswith("Dirigeants :"):
             out["dirigeants"] = ln.replace("Dirigeants :", "").strip()
             j = i + 1
-            while j < len(lines) and (lines[j].startswith("Président") or lines[j].startswith("Directeur") or ":" in lines[j]):
+            while (
+                j < len(lines)
+                and (lines[j].startswith("Président") or lines[j].startswith("Directeur") or ":" in lines[j])
+                and not lines[j].startswith(_DIRIGEANTS_STOP_PREFIXES)
+            ):
                 out["dirigeants"] += " " + lines[j]
                 j += 1
         elif ln.startswith("Nombre de titres :"):
@@ -125,12 +137,14 @@ def fetch_company_page(symbol: str, country_code: str) -> dict[str, Any]:
             idx = lines.index(ln)
             if idx + 1 < len(lines):
                 raw = lines[idx + 1]
-                if "*" in raw and (";" in raw or "," in raw):
-                    for part in re.split(r"[;,]", raw):
+                if "*" in raw:
+                    # Split on ";" only: "," is the French decimal separator in the pct
+                    for part in raw.split(";"):
                         part = _normalize(part)
-                        if "*" in part:
-                            name, pct = part.rsplit("*", 1)
-                            out["shareholders"].append({"name": _normalize(name), "pct": _normalize(pct)})
+                        m = re.search(r"\*([\d\s]+[.,]?\d*)", part)
+                        if m:
+                            name = _normalize(part[: m.start()])
+                            out["shareholders"].append({"name": name, "pct": _normalize(m.group(1))})
             break
 
     # Performance table: parse HTML tables first
@@ -195,8 +209,16 @@ def save_company_details(symbol: str, data: dict[str, Any], save_dir: Path | Non
     dir_path.mkdir(parents=True, exist_ok=True)
     sym = (symbol or "").strip().upper()
     path = dir_path / f"{sym}.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp_path = path.with_suffix(".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
     logger.info("Company details saved: %s", path)
     return path
 

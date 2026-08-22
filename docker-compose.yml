@@ -13,7 +13,9 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: brvm
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brvm}
+      # No fallback default on purpose: compose fails fast with a clear message
+      # when POSTGRES_PASSWORD is unset, instead of deploying a known password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
       POSTGRES_DB: brvm
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,6 +27,13 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    # Cap the json-file log driver (uncapped it grows unbounded on an always-on
+    # host). Same block on every service below.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   api:
     build: .
@@ -32,14 +41,25 @@ services:
     command: python run_api.py
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:-brvm}@db:5432/brvm
+      - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
       # Inside the compose network the bot reaches Evolution by service name.
       - EVOLUTION_URL=http://evolution:8080
       # In-container port stays 8000; API_PORT in .env only changes the
       # published host port below.
       - API_PORT=8000
+      # Inside the container the API must listen on all interfaces so the bot
+      # service and the published port can reach it. Host-side exposure is
+      # limited by the ports mapping below (default 127.0.0.1).
+      - API_BIND=0.0.0.0
+      # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
+      # must match the market. Override TZ in .env.
+      - TZ=${TZ:-Africa/Abidjan}
     ports:
-      - "${API_PORT:-8000}:8000"
+      # Localhost-only by default: the API can run unauthenticated in dev mode.
+      # Set API_BIND=0.0.0.0 in .env ONLY when the Meta WhatsApp webhook needs
+      # public ingress — the Evolution gateway and the Telegram bot don't (they
+      # use the compose network / outbound polling).
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
       - bot_data:/app/app/data
     healthcheck:
@@ -54,6 +74,11 @@ services:
       evolution:
         condition: service_started
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   bot:
     build: .
@@ -61,7 +86,10 @@ services:
     env_file: .env
     environment:
       - BRVM_API_URL=http://api:8000
-      - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:-brvm}@db:5432/brvm
+      - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
+      # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
+      # must match the market. Override TZ in .env.
+      - TZ=${TZ:-Africa/Abidjan}
     volumes:
       - bot_data:/app/app/data
     depends_on:
@@ -70,6 +98,11 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # Evolution API: self-hosted WhatsApp gateway (Baileys). Pair a WhatsApp
   # number via QR code, then point its webhook at the api service:
@@ -93,7 +126,7 @@ services:
       - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
       - DATABASE_ENABLED=true
       - DATABASE_PROVIDER=postgresql
-      - DATABASE_CONNECTION_URI=postgresql://brvm:${POSTGRES_PASSWORD:-brvm}@db:5432/evolution
+      - DATABASE_CONNECTION_URI=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/evolution
       - DATABASE_CONNECTION_CLIENT_NAME=evolution
       - DATABASE_SAVE_DATA_INSTANCE=true
       - DATABASE_SAVE_DATA_NEW_MESSAGE=true
@@ -117,6 +150,11 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 volumes:
   bot_data:
   postgres_data:

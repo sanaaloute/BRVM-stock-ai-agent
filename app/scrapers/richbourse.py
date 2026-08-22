@@ -247,4 +247,13 @@ class RichBourseScraper(BaseScraper):
                 if row:
                     out["stocks"].append(row)
 
+        # Dedupe by symbol (keep first) — the page can render multiple matching tables
+        seen_sym: set[str] = set()
+        unique_stocks = []
+        for x in out["stocks"]:
+            if x["symbol"] not in seen_sym:
+                seen_sym.add(x["symbol"])
+                unique_stocks.append(x)
+        out["stocks"] = unique_stocks
+
         return out

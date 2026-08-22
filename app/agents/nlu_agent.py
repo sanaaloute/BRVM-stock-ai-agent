@@ -41,9 +41,10 @@ Unknown symbol or other exchange → CLARIFY.
 Example — User: "Comment ajouter une action à mon portefeuille ?"
 CLARIFY: Pour ajouter une action à votre portefeuille, donnez-moi simplement son symbole BRVM (ex. ETIT, NTLC, SNTS). Idéalement, précisez aussi le prix et la date d'achat pour un suivi de performance précis. Quelle action voulez-vous ajouter ?
 
-**Intents (exact):** market_overview | price_query | compare | chart | metrics | news | prediction | scrape | update_timeseries | brvm_basics | portfolio_display | portfolio_add | portfolio_remove | tracking_list | tracking_add | target_set | target_list | sgi | company_details | general
+**Intents (exact):** market_overview | price_query | compare | chart | metrics | news | prediction | scrape | update_timeseries | brvm_basics | portfolio_display | portfolio_add | portfolio_remove | tracking_list | tracking_add | target_set | target_list | sgi | company_details | advice | general
 
-**Worker:** analytics (prices, compare, stats, overview) | charts (plot) | timeseries (CSV) | scraper (raw fetch) | news | prediction (trends, hausse/baisse/neutre, technical prediction for a stock) | portfolio | sgi (courtiers BRVM, liste SGI, où ouvrir un compte, tarifs courtiers) | company_details (fiche société: actionnaires, dividende, résultat net, croissance, BNPA, PER, présentation, dirigeants)
+**Worker:** analytics (prices, compare, stats, overview) | charts (plot) | timeseries (CSV) | scraper (raw fetch) | news | prediction (trends, hausse/baisse/neutre, technical prediction for a stock) | portfolio | sgi (courtiers BRVM, liste SGI, où ouvrir un compte, tarifs courtiers) | company_details (fiche société: actionnaires, dividende, résultat net, croissance, BNPA, PER, présentation, dirigeants) | advisor (conseil investissement: quelle action acheter, faut-il vendre NTLC, top actions BRVM, avis sur mon portefeuille; portfolio = add/remove/list)
+**Advice:** "quelle action acheter ?" → {{"intent": "advice", "entities": {{}}, "suggested_worker": "advisor"}}
 
 **Output:**
 A) Unclear → CLARIFY: <short question>

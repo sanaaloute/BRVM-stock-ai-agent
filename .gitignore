@@ -8,8 +8,14 @@ __pycache__/
 .venv/
 venv/
 
+# Local tooling (uv + standalone python for the test venv)
+.tools/
+
 # Environment variables
 .env
+
+# Private keys / certificates (never commit)
+*.pem
 
 # Logs
 *.log
@@ -24,6 +30,3 @@ app/data/palmares_cache.json
 app/data/sgi_brvm.json
 debug-ce8ad8.log
 app/data/series/*.csv
-
-# Tests
-tests/
