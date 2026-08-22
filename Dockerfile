@@ -12,6 +12,8 @@ RUN pip install --upgrade pip \
 # App and data
 COPY config.py .
 COPY run_agent.py run_api.py run_telegram_bot.py run_scrapers.py run_sgi_fetch.py ./
+COPY run_migrations.py run_company_details_fetch.py ./
+COPY alembic.ini ./
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 COPY app app/
@@ -31,6 +33,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 ARG WHISPER_MODEL=small
 ENV WHISPER_MODEL=${WHISPER_MODEL}
 ENV HF_HOME=/app/.cache/huggingface
+# huggingface.co is unreachable from some networks (the model bake fails with
+# ConnectError). hf-mirror.com mirrors the Hub; HF_HUB_DISABLE_XET forces the
+# plain-LFS path because the xet CAS backend (cas-server.xethub.hf.co) bypasses
+# HF_ENDPOINT. On a network that reaches HF directly, override at runtime with
+# HF_ENDPOINT=https://huggingface.co (container env beats image ENV).
+ENV HF_ENDPOINT=https://hf-mirror.com
+ENV HF_HUB_DISABLE_XET=1
 RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
 
 ENV PYTHONUNBUFFERED=1
