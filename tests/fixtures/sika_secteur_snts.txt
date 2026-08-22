@@ -1,0 +1,43 @@
+![menu mobile](/img/vector.png)
+![](/img/icon_search.png)
+![](/img/icon_person.png)
+
+**CONNECTEZ-VOUS**
+
+[Identifiant oublié ?](/users/password)  
+[Créer un compte gratuit](/users/login)
+
+[Liste de valeurs](/listes/displaylist)
+
+[Portefeuille virtuel](/portif/displayp)
+
+[Mon compte](/users/compte)
+
+[Se déconnecter](#)
+
+![sikafinance](/img/logosikafinance_general3.png)
+![Sika Academy](/img/sikaacademybtn.png)
+![Sika Pro](/img/sikaprobtn2.png)
+![ci](/i/ci.png)
+![ci](/i/ci.png)
+![ci](/i/sn.png)
+![cm](/i/cemac.png)
+
+# SONATEL appartient au secteur BRVM - TELECOMMUNICATIONS
+
+![](/i/sn.png "Sénégal")
+
+Liste des sociétés du secteur d'activité BRVM - TELECOMMUNICATIONS
+
+| Nom | Ouverture | +Haut | +Bas | Volume | Dernier | Variation jour | Variation 1er janvier |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [ONATEL BF](/marches/cotation_ONTBF.bf) | 2 940 | 2 940 | 2 885 | 4845 | **2 885** | -1.87% | +16,10% |
+| [ORANGE CI](/marches/cotation_ORAC.ci) | 20 205 | 21 015 | 20 205 | 1539 | **21 015** | 4.01% | +47,47% |
+| [SONATEL](/marches/cotation_SNTS.sn) | 34 400 | 36 980 | 34 400 | 13615 | **36 980** | 7.50% | +41,58% |
+
+Voir [tous les secteurs d'activité](/marches/secteurs) en bourse
+
+![](/i/facebook.png)
+![](/i/twit.png)
+![](/i/linkedin.png)
+![](/i/youtube.png)

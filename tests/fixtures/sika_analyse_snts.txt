@@ -1,0 +1,100 @@
+![menu mobile](/img/vector.png)
+
+[![](/img/icon_search.png) Rechercher](/search)   [![](/img/icon_person.png) Connexion](#) 
+
+**CONNECTEZ-VOUS**
+
+CONNEXION
+
+[Identifiant oublié ?](/users/password)  
+ [Créer un compte gratuit](/users/login)
+
+[Liste de valeurs](/listes/displaylist)
+
+[Portefeuille virtuel](/portif/displayp)
+
+[Mon compte](/users/compte)
+
+[Se déconnecter](#)
+
+[![sikafinance](/img/logosikafinance_general3.png)](/) L’information économique au cœur des marchés africains
+
+* + [Les actualités économiques](/economie/)
+  + [Champions de la finance](/champions/)
+  + [Immobilier](/immo/prix_terrains_ci)
+  + [Matières premières](/economie/commodities)
+  + [Info Conso - Prix](/conso/liste_des_prix)
+  + [Vidéos One to One](/onetoone)
+* + [Accueil Bourse & Marché](/bourse/)
+  + [Actualités du marché](/marches/actualites_bourse_brvm)
+  + [Communiqués des sociétés](/marches/communiques_brvm)
+  + [Convertisseur de devises](/marches/convertisseur_devises)
+  + [Cotations de A à Z](/marches/aaz)
+  + [Dividendes à venir](/marches/dividendes)
+  + [Indices africains](/marches/indices_afrique)
+  + [Les devises](/marches/devises)
+  + [OPCVM](/opcvm/)
+  + [Palmarès de la bourse](/marches/palmares)
+  + [Secteurs d'activité](/marches/secteurs)
+  + [Graphique dynamique](/applet/graphe_dynamique)
+  + [Market Map](/marches/marketmap)
+  + [Les SGI de la BRVM](/sgi_de_la_brvm)
+* + [abonnement](/premium/)
+  + [Articles premium](/premium/articles)
+  + [Tops et classements](/premium/tops_et_classements)
+* [Formations](/formations)
+* + [Emprunt immobilier](/simulateurs/emprunt)
+  + [Budget Familial](/simulateurs/budget)
+  + [Intérêts composés](/simulateurs/InteretsComposes)
+  + [Quel est votre profil d'investisseur ?](/simulateurs/profil-investisseur)
+  + [Simulateur de dilution SAFCA](/marches/simulateur_dilution_safca)
+* [Forum](/forums/displaynewthread)
+* [Orange News](/newsletter-orange-business)
+
+[![Sika Academy](/img/sikaacademybtn.png)](/challenge)   [![Sika Pro](/img/sikaprobtn2.png)](/sikapro)
+
+![ci](/i/ci.png)
+
+![ci](/i/ci.png) CI
+
+![ci](/i/sn.png) SN
+
+![cm](/i/cemac.png) CEMAC
+
+# SONATEL : analyses et conseils
+
+![](/i/sn.png "Sénégal") SN0000000019 - SNTS
+
+La BRVM Ouvre dans 35h18min
+
+[![](/i/bkpremium_desktop.jpg)](/premium)
+
+## Indicateurs d'analyse technique sur SONATEL
+
+### Les indicateurs de tendance
+
+![](/img/fleche_up.png) Les cours évoluent au-dessus de leur moyenne mobile à 20 jours.  
+ ![](/img/fleche_up.png)Les cours évoluent au-dessus de leur moyenne mobile à 50 jours.  
+ ![](/img/fleche_up.png)Les cours évoluent au-dessus de leur moyenne mobile à 100 jours.  
+ ![](/img/fleche_neu.png)Les cours évoluent à l'intérieur des bandes de Bollinger  
+ ![](/img/fleche_up.png)L'ADX est en hausse et +DI est au dessus de –DI
+
+### Les indicateurs de momentum
+
+![](/img/fleche_down.png)Le RSI 14 jours est de 86,0%. La valeur est surachetée.  
+ ![](/img/fleche_down.png)Le CCI est au dessus du niveau de 100
+
+### Les oscillateurs
+
+![](/img/fleche_up.png)La MACD évolue au dessus de sa ligne de signal.  
+ ![](/img/fleche_up.png)La Stochastique évolue au dessus de sa ligne de signal.
+
+### Volumes et Chandeliers Japonais
+
+![](/img/fleche_neu.png)Aucune observation notable sur les volumes d'échanges.  
+   
+ ![](/img/fleche_up.png)La valeur a réalisé une englobante haussière.
+
+Les analyses réalisées par sikafinance.com n'ont aucune valeur contractuelle et ne constituent en aucun cas une offre de vente ou une sollicitation d'achat de valeurs mobilières ou autre produit financier. La responsabilité de la société ne saurait être engagée en cas d'erreur, d'omission ou d'investissement inopportun. Les informations publiées sur sikafinance.com s'adressent à des investisseurs disposant des connaissances nécessaires pour les comprendre et les apprécier. Ces dernières sont diffusées à titre purement indicatif et pédagogique.
+
+ 

@@ -230,13 +230,17 @@ Python — no LLM, no invented numbers):
 → French signal: **Achat** (≥ 70), **Accumuler** (≥ 55), **Neutre** (≥ 40),
 **Alléger** (< 40).
 
-- Technicals: trend (price vs MM50/MM200), momentum (3/6/12-month returns), RSI(14), risk (20-day volatility, 1-year max drawdown), volume trend.
-- Fundamentals: growth (résultat net + chiffre d'affaires, YoY), valuation (PER vs the BRVM median PER), dividend yield.
+- Technicals: trend (price vs MM50/MM200), momentum (3/6/12-month returns), RSI(14), risk (20-day volatility, 1-year max drawdown, **beta 1 an** when available), volume trend, plus a small adjustment (±4 pts) from **Sika Finance's precomputed technical consensus** (trend/momentum/oscillator/candlestick signals).
+- Fundamentals: growth (résultat net + chiffre d'affaires, YoY), valuation (PER vs the BRVM median PER), dividend (**5-year average yield** with a consistency bonus/penalty when the Sika dividend history is available, else latest year).
 
 **Data sources**: daily OHLCV price history scraped from the Rich Bourse chart
 pages (`app/data/series/*.csv`, refreshed daily by the timeseries job) and
 annual fundamentals from the Sika Finance company fiches
-(`app/data/company_details/*.json`, refreshed weekly). The engine only reads
+(`app/data/company_details/*.json`, refreshed weekly — societe + COURS + ANALYSE
++ SECTEUR tabs: beta, ranges, dividend history, technical signals, sector
+peers). Sika blocks non-browser HTTP clients, so all Sika fetches go through
+Tavily extract (`SIKA_TABS_ENABLED=false` saves ~150 Tavily credits/week by
+skipping the three extra tabs). The engine only reads
 local caches — `score_all` never live-scrapes.
 
 **Limitations (honest)**: no debt or balance-sheet data (not published in a
@@ -259,6 +263,7 @@ of your own portfolio and tracking symbols.
 | `SCORING_TECHNICAL_WEIGHT` | `0.6` | Weight of the technical block in the 0-100 score |
 | `SCORING_FUNDAMENTAL_WEIGHT` | `0.4` | Weight of the fundamental block in the 0-100 score |
 | `COMPANY_DETAILS_REFRESH_DAYS` | `7` | Max age of the company fiches before re-fetch (entrypoint) |
+| `SIKA_TABS_ENABLED` | `true` | Weekly fetch of the Sika COURS/ANALYSE/SECTEUR tabs (beta, technical signals, dividend history, sector peers) via Tavily |
 
 ## Production hardening
 

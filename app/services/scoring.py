@@ -84,6 +84,14 @@ def _parse_fr_number(value: Any) -> float | None:
         return None
 
 
+def _safe_int(value: Any) -> int:
+    """int() that never raises (Sika consensus counts); 0 on bad input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _sma(values: list[float], window: int) -> float | None:
     if len(values) < window:
         return None
@@ -156,6 +164,29 @@ def _latest_metric(perf: dict, metric: str) -> float | None:
     return vals[-1][1] if vals else None
 
 
+def _dividend_history(market: Any) -> list[tuple[int, float, float]]:
+    """(year, montant, rendement_pct) triples from Sika's dividend history,
+    oldest first. Entries missing montant or rendement are dropped."""
+    entries = market.get("dividend_history") if isinstance(market, dict) else None
+    if not isinstance(entries, list):
+        return []
+    out: list[tuple[int, float, float]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            year = int(entry.get("year"))
+        except (TypeError, ValueError):
+            continue
+        montant = _parse_fr_number(entry.get("montant"))
+        rendement = _parse_fr_number(entry.get("rendement_pct"))
+        if montant is None or rendement is None:
+            continue
+        out.append((year, montant, rendement))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
 def _growth_fraction(perf: dict, growth_key: str, level_key: str) -> float | None:
     """Latest growth as a fraction (0.16 = +16%).
 
@@ -209,10 +240,30 @@ def _current_price(symbol: str, closes: list[float]) -> float | None:
 # ---------------------------------------------------------------------------
 # Subscore blocks
 # ---------------------------------------------------------------------------
-def _compute_technicals(rows: list[dict], closes: list[float]) -> tuple[dict, list[str]]:
+def _beta_points(beta: float) -> float:
+    """Beta (1 an) subscore 0-2: <= 0.8 -> 2 pts, >= 1.5 -> 0, linear between."""
+    if beta <= 0.8:
+        return 2.0
+    if beta >= 1.5:
+        return 0.0
+    return 2.0 * (1.5 - beta) / 0.7
+
+
+def _compute_technicals(
+    symbol: str,
+    rows: list[dict],
+    closes: list[float],
+) -> tuple[dict, list[str]]:
     """Technical block (0-100) + French data warnings."""
     warnings: list[str] = []
     price = closes[-1]
+    try:
+        details = load_company_details(symbol)
+    except Exception:
+        details = None
+    market = (details or {}).get("market")
+    if not isinstance(market, dict):
+        market = {}
 
     # --- Trend (0-30): SMA20/50/200 alignment + price position (6 pts each) ---
     sma20 = _sma(closes, 20)
@@ -287,6 +338,16 @@ def _compute_technicals(rows: list[dict], closes: list[float]) -> tuple[dict, li
     else:
         dd_pts = 7.0 * (0.50 - dd) / 0.40
     risk = vol_pts + dd_pts
+    # Sika Finance beta (1 an): when a positive beta is available, rebalance
+    # risk to vol (0-7) + drawdown (0-6) + beta (0-2). Absent/invalid beta
+    # keeps the legacy 8/7 split untouched.
+    beta_val = _parse_fr_number(market.get("beta_1an"))
+    if beta_val is not None and beta_val <= 0:
+        beta_val = None
+    if beta_val is not None:
+        vol_pts = vol_pts * 7.0 / 8.0
+        dd_pts = dd_pts * 6.0 / 7.0
+        risk = vol_pts + dd_pts + _beta_points(beta_val)
 
     # --- Volume trend (0-10): avg volume last 20 sessions vs previous 40 ---
     vols = [float(r["volume"]) for r in rows if r.get("volume") is not None]
@@ -306,12 +367,27 @@ def _compute_technicals(rows: list[dict], closes: list[float]) -> tuple[dict, li
                 volume_pts = 3.0
         else:
             volume_pts = 6.0  # zero prior volume: neutral-ish, avoid div by 0
+    # Sika Finance technical consensus: max(-2, min(2, up - down)) * 2 points
+    # (so -4..+4) added to the block, only when >= 3 signals are available.
+    ta = (details or {}).get("technical_analysis")
+    ta_present = isinstance(ta, dict) and bool(ta)
+    cons_up = cons_down = cons_neutral = 0
+    cons_adj = 0
+    if ta_present:
+        cons_up = _safe_int(ta.get("up"))
+        cons_down = _safe_int(ta.get("down"))
+        cons_neutral = _safe_int(ta.get("neutral"))
+        signals = ta.get("signals")
+        if isinstance(signals, list) and len(signals) >= 3:
+            cons_adj = max(-2, min(2, cons_up - cons_down)) * 2
+
     if volume_pts is None:
         # No usable volume data: rescale the other subscores to keep 0-100.
         warnings.append("Volumes indisponibles")
         block = (trend + momentum + rsi_pts + risk) / 90.0 * 100.0
     else:
         block = trend + momentum + rsi_pts + risk + volume_pts
+    block = _clamp(block + cons_adj, 0.0, 100.0)
 
     technicals = {
         "trend": round(trend, 2),
@@ -332,6 +408,13 @@ def _compute_technicals(rows: list[dict], closes: list[float]) -> tuple[dict, li
         "max_drawdown_1y": round(dd, 4),
         "volume_ratio": round(volume_ratio, 4) if volume_ratio is not None else None,
     }
+    if beta_val is not None:
+        technicals["beta_1an"] = round(beta_val, 2)
+    if ta_present:
+        technicals["sika_consensus_up"] = cons_up
+        technicals["sika_consensus_down"] = cons_down
+        technicals["sika_consensus_neutral"] = cons_neutral
+        technicals["sika_consensus_adj"] = cons_adj
     return technicals, warnings
 
 
@@ -383,10 +466,30 @@ def _compute_fundamentals(
             # per <= 0.5*median -> 35, per >= 2*median -> 0, linear between.
             valuation = _clamp((2.0 * median - per) / (1.5 * median)) * 35.0
 
-    # --- Dividend (0-25): yield = dividende / price ---
+    # --- Dividend (0-25): 5-year average yield when Sika's dividend history
+    # has >= 3 yearly entries, else single-year yield = dividende / price ---
     div = _latest_metric(perf, "dividende")
     div_yield = None
-    if div is None:
+    div_yield_avg = None
+    div_years = 0
+    div_never_cut = False
+    div_history = _dividend_history((details or {}).get("market"))
+    if len(div_history) >= 3:
+        # Same 0% -> 5 / >= 6% -> 25 mapping on the average rendement_pct,
+        # plus a consistency modifier on the montant: +3 when never cut,
+        # -3 when cut at least twice.
+        avg_pct = sum(h[2] for h in div_history) / len(div_history)
+        base = 5.0 + _clamp((avg_pct / 100.0) / 0.06) * 20.0
+        cuts = sum(
+            1 for i in range(1, len(div_history))
+            if div_history[i][1] < div_history[i - 1][1]
+        )
+        modifier = 3.0 if cuts == 0 else (-3.0 if cuts >= 2 else 0.0)
+        dividend_pts = _clamp(base + modifier, 0.0, 25.0)
+        div_yield_avg = avg_pct / 100.0
+        div_years = len(div_history)
+        div_never_cut = cuts == 0
+    elif div is None:
         dividend_pts = 12.5
         warnings.append("Dividende indisponible")
     elif price is None or price <= 0:
@@ -409,6 +512,10 @@ def _compute_fundamentals(
         "dividende": div,
         "dividend_yield": round(div_yield, 4) if div_yield is not None else None,
     }
+    if div_yield_avg is not None:
+        fundamentals["dividend_yield_avg_5y"] = round(div_yield_avg, 4)
+        fundamentals["dividend_history_years"] = div_years
+        fundamentals["dividend_never_cut"] = div_never_cut
     return fundamentals, warnings
 
 
@@ -484,7 +591,14 @@ def _build_reasons(technicals: dict, fundamentals: dict) -> list[str]:
 
     div = fundamentals.get("dividende")
     div_yield = fundamentals.get("dividend_yield")
-    if div is not None and div <= 0:
+    div_yield_avg = fundamentals.get("dividend_yield_avg_5y")
+    if div_yield_avg is not None:
+        years = fundamentals.get("dividend_history_years") or 5
+        text = f"Rendement moyen du dividende sur {years} ans : {_fmt_fr(div_yield_avg * 100)} %"
+        if fundamentals.get("dividend_never_cut"):
+            text += f", dividende jamais baissé depuis {years} ans"
+        add(fundamentals["dividend"] - 12.5, text)
+    elif div is not None and div <= 0:
         add(fundamentals["dividend"] - 12.5, "Pas de dividende")
     elif div_yield is not None and div_yield >= 0.005:
         add(fundamentals["dividend"] - 12.5,
@@ -497,9 +611,64 @@ def _build_reasons(technicals: dict, fundamentals: dict) -> list[str]:
     if dd is not None and dd >= 0.30:
         add(technicals["risk"] - 7.5, f"Drawdown important : -{dd * 100:.0f} % sur 12 mois")
 
+    beta = technicals.get("beta_1an")
+    if beta is not None and beta > 0:
+        if beta <= 0.8:
+            sensitivity = "faible sensibilité au marché"
+        elif beta >= 1.2:
+            sensitivity = "sensibilité élevée au marché"
+        else:
+            sensitivity = "sensibilité moyenne au marché"
+        add(_beta_points(beta) - 1.0, f"Bêta 1 an : {_fmt_fr(beta, 2)} ({sensitivity})")
+
+    cons_adj = technicals.get("sika_consensus_adj")
+    if cons_adj:
+        add(float(cons_adj),
+            f"Analyse technique Sika Finance : "
+            f"{technicals.get('sika_consensus_up') or 0} signaux haussiers, "
+            f"{technicals.get('sika_consensus_down') or 0} baissiers")
+
     # Stable sort: biggest absolute contribution first, insertion order on ties.
     candidates.sort(key=lambda t: -t[0])
     return [text for _, text in candidates[:6]]
+
+
+def _sector_context(symbol: str) -> str | None:
+    """Informational sector-rank line from Sika's peer table (None when the
+    symbol or its peers have no usable YTD variation). No score impact."""
+    try:
+        details = load_company_details(symbol)
+    except Exception:
+        return None
+    sector = (details or {}).get("sector")
+    if not isinstance(sector, dict):
+        return None
+    peers = sector.get("peers")
+    if not isinstance(peers, list):
+        return None
+    self_ytd = None
+    ytds: list[float] = []
+    for peer in peers:
+        if not isinstance(peer, dict):
+            continue
+        ytd = _parse_fr_number(peer.get("variation_ytd_pct"))
+        if str(peer.get("symbol") or "").strip().upper() == symbol:
+            self_ytd = ytd
+        if ytd is not None:
+            ytds.append(ytd)
+    if self_ytd is None or not ytds:
+        return None
+    rank = 1 + sum(1 for y in ytds if y > self_ytd)
+    median = statistics.median(ytds)
+    name = str(sector.get("name") or "").strip()
+    if name.startswith("BRVM - "):
+        name = name[len("BRVM - "):]
+    line = f"Secteur {name} : {_fmt_pct_signed(self_ytd / 100.0)} depuis janvier"
+    if rank == 1:
+        return line + " — 1er du secteur"
+    if self_ytd < median:
+        return line + " — à la traîne du secteur"
+    return line + f" — {rank}e du secteur"
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +728,7 @@ def score_symbol(
         return out
 
     closes = [float(r["price"]) for r in rows]
-    technicals, tech_warnings = _compute_technicals(rows, closes)
+    technicals, tech_warnings = _compute_technicals(sym, rows, closes)
     price = _current_price(sym, closes)
     fundamentals, fund_warnings = _compute_fundamentals(sym, price, per_median=_per_median)
 
@@ -572,10 +741,16 @@ def score_symbol(
         ),
         1,
     )
+    reasons = _build_reasons(technicals, fundamentals)
+    sector_line = _sector_context(sym)
+    if sector_line:
+        # Informational only, appended after the score-driving reasons
+        # (the usual 6-reason cap becomes 7 with a sector line).
+        reasons.append(sector_line)
     out.update({
         "score": score,
         "signal": signal_for_score(score),
-        "reasons": _build_reasons(technicals, fundamentals),
+        "reasons": reasons,
         "technicals": technicals,
         "fundamentals": fundamentals,
         "data_warnings": tech_warnings + fund_warnings,

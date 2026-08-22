@@ -1,0 +1,231 @@
+{
+  "symbol": "SNTS",
+  "country_code": "sn",
+  "source_url": "https://www.sikafinance.com/marches/societe/SNTS.sn",
+  "company_name": "SONATEL",
+  "code": "",
+  "presentation": "La société : La Société Nationale des Télécommunications du Sénégal (SONATEL), premier opérateur téléphonique au Sénégal, a été créée en 1985 suite à la fusion du «Bureau des postes et télécommunications» et de «TV Senegal». SONATEL est devenue une entreprise privée en 1997 lorsque France Télécom a pris une participation de 42,33% dans le capital. Afin de faire face à la concurrence croissante, la société a entrepris une stratégie de croissance externe, aidée par son partenaire stratégique Orange. Depuis 2002 SONATEL est présente au Mali, en 2007, la société a été créée en Guinée et en Guinée Bissau. L'acquisition la plus récente de la société en 2016 a été l'opérateur leader en Sierra Leone (Airtel). Grâce à sa marque Orange, SONATEL fournit des solutions de télécommunications dans les domaines du téléphone, du mobile, de l'internet, de la télévision et des données à plus de 30 millions d’abonnés et dispose d'un parc actif Orange money de 4,5 millions d’abonnés. Comme la plupart des opérateurs globaux de télécommunications intégrées, l'objectif de SONATEL est de tirer pleinement parti de la convergence du mobile, de l'internet et de télévision sous une seule marque.",
+  "phone": "(+221) 33-839-12-00",
+  "fax": "(+221) 33-839-12-12",
+  "address": "6 Rue WAGANE DIOUF, Sénégal",
+  "dirigeants": "Président du Conseil d’Administration : Alioune NDIAYE Directeur Général : Brelotte BA Directrice Générale adjointe : Aminata NDIAYE NIANG",
+  "nombre_titres": "100 000 000",
+  "flottant": "22,47%",
+  "valorisation": "3 100 000 MFCFA",
+  "shareholders": [],
+  "performance": {
+    "chiffre_affaires": {
+      "2021": "1 334 874",
+      "2022": "1 455 049",
+      "2023": "1 620 701",
+      "2024": "1 776 443",
+      "2025": "1 923 122"
+    },
+    "croissance_ca": {
+      "2021": "",
+      "2022": "9,00%",
+      "2023": "11,38%",
+      "2024": "9,61%",
+      "2025": "8,26%"
+    },
+    "resultat_net": {
+      "2021": "252 459",
+      "2022": "278 912",
+      "2023": "331 748",
+      "2024": "393 662",
+      "2025": "413 588"
+    },
+    "croissance_rn": {
+      "2021": "",
+      "2022": "10,48%",
+      "2023": "18,94%",
+      "2024": "18,66%",
+      "2025": "5,06%"
+    },
+    "bnpa": {
+      "2021": "2 524,59",
+      "2022": "2 789,00",
+      "2023": "3 317,00",
+      "2024": "3 937,00",
+      "2025": "4 136,00"
+    },
+    "per": {
+      "2021": "12,28",
+      "2022": "11,12",
+      "2023": "9,35",
+      "2024": "7,87",
+      "2025": "7,50"
+    },
+    "dividende": {
+      "2021": "1 400,00",
+      "2022": "1 500,00",
+      "2023": "1 575,00",
+      "2024": "1 655,00",
+      "2025": "1 740,00"
+    }
+  },
+  "market": {
+    "beta_1an": 1.31,
+    "rsi_14": 86.03,
+    "capital_echange_pct": 0.01,
+    "valorisation_millions": 3698000.0,
+    "day": {
+      "ouverture": 34400.0,
+      "plus_haut": 36980.0,
+      "plus_bas": 34400.0,
+      "cloture_veille": 34400.0,
+      "volume_titres": 13615.0,
+      "volume_fcfa": 503482700.0
+    },
+    "ranges": {
+      "1_semaine": {
+        "plus_haut": 36980.0,
+        "plus_bas": 31900.0,
+        "variation_pct": 15.92
+      },
+      "1_mois": {
+        "plus_haut": 36980.0,
+        "plus_bas": 30200.0,
+        "variation_pct": 17.4
+      },
+      "1er_janvier": {
+        "plus_haut": 36980.0,
+        "plus_bas": 24400.0,
+        "variation_pct": 41.58
+      },
+      "1_an": {
+        "plus_haut": 36980.0,
+        "plus_bas": 24400.0,
+        "variation_pct": 49.14
+      },
+      "3_ans": {
+        "plus_haut": 36980.0,
+        "plus_bas": 16000.0,
+        "variation_pct": 126.18
+      },
+      "5_ans": {
+        "plus_haut": 36980.0,
+        "plus_bas": 13500.0,
+        "variation_pct": 164.14
+      }
+    },
+    "dividend_history": [
+      {
+        "year": 2025,
+        "montant": 1740.0,
+        "rendement_pct": 7.25
+      },
+      {
+        "year": 2024,
+        "montant": 1655.0,
+        "rendement_pct": 9.2
+      },
+      {
+        "year": 2023,
+        "montant": 1575.0,
+        "rendement_pct": 10.36
+      },
+      {
+        "year": 2022,
+        "montant": 1500.0,
+        "rendement_pct": 10.73
+      },
+      {
+        "year": 2021,
+        "montant": 1400.0,
+        "rendement_pct": 10.37
+      }
+    ],
+    "fetched_at": "2026-08-22T23:03:33.757606+00:00"
+  },
+  "technical_analysis": {
+    "signals": [
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "Les cours évoluent au-dessus de leur moyenne mobile à 20 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "Les cours évoluent au-dessus de leur moyenne mobile à 50 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "Les cours évoluent au-dessus de leur moyenne mobile à 100 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "neutral",
+        "text": "Les cours évoluent à l'intérieur des bandes de Bollinger"
+      },
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "L'ADX est en hausse et +DI est au dessus de –DI"
+      },
+      {
+        "group": "momentum",
+        "direction": "down",
+        "text": "Le RSI 14 jours est de 86,0%. La valeur est surachetée."
+      },
+      {
+        "group": "momentum",
+        "direction": "down",
+        "text": "Le CCI est au dessus du niveau de 100"
+      },
+      {
+        "group": "oscillateurs",
+        "direction": "up",
+        "text": "La MACD évolue au dessus de sa ligne de signal."
+      },
+      {
+        "group": "oscillateurs",
+        "direction": "up",
+        "text": "La Stochastique évolue au dessus de sa ligne de signal."
+      },
+      {
+        "group": "volumes_chandeliers",
+        "direction": "neutral",
+        "text": "Aucune observation notable sur les volumes d'échanges."
+      },
+      {
+        "group": "volumes_chandeliers",
+        "direction": "up",
+        "text": "La valeur a réalisé une englobante haussière."
+      }
+    ],
+    "up": 7,
+    "down": 2,
+    "neutral": 2,
+    "fetched_at": "2026-08-22T23:03:33.757606+00:00"
+  },
+  "sector": {
+    "name": "TELECOMMUNICATIONS",
+    "peers": [
+      {
+        "symbol": "ONTBF",
+        "name": "ONATEL BF",
+        "dernier": 2885.0,
+        "variation_jour_pct": -1.87,
+        "variation_ytd_pct": 16.1
+      },
+      {
+        "symbol": "ORAC",
+        "name": "ORANGE CI",
+        "dernier": 21015.0,
+        "variation_jour_pct": 4.01,
+        "variation_ytd_pct": 47.47
+      },
+      {
+        "symbol": "SNTS",
+        "name": "SONATEL",
+        "dernier": 36980.0,
+        "variation_jour_pct": 7.5,
+        "variation_ytd_pct": 41.58
+      }
+    ],
+    "fetched_at": "2026-08-22T23:03:16.859308+00:00"
+  }
+}

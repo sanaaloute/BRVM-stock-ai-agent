@@ -323,3 +323,13 @@ SCORING_FUNDAMENTAL_WEIGHT = float(os.getenv("SCORING_FUNDAMENTAL_WEIGHT", "0.4"
 DIGEST_ENABLED = os.getenv("DIGEST_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 
 DIGEST_HOUR_GMT = int(os.getenv("DIGEST_HOUR_GMT", "18").strip() or "18")
+
+
+
+# Sika Finance tab enrichment: the weekly company-details refresh also fetches
+
+# the COURS / ANALYSE / SECTEUR tabs (beta, technical signals, dividend history,
+
+# sector peers) via Tavily (~150 extract credits/week). Set false to save quota.
+
+SIKA_TABS_ENABLED = os.getenv("SIKA_TABS_ENABLED", "true").strip().lower() in ("1", "true", "yes")

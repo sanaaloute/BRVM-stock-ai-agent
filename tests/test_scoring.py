@@ -214,6 +214,209 @@ def test_signal_bands():
     assert scoring.signal_for_score(39.9) == scoring.SIGNAL_REDUCE
 
 
+# ---------------- Sika Finance enriched-data tests ----------------
+def make_dividend_history(montants, yields):
+    return [{"year": 2020 + i, "montant": float(m), "rendement_pct": float(y)}
+            for i, (m, y) in enumerate(zip(montants, yields))]
+
+
+def make_technical_analysis(up, down, neutral=0, signals_count=None):
+    n = signals_count if signals_count is not None else up + down + neutral
+    return {
+        "signals": [{"group": "tendance", "direction": "up", "text": "x"}
+                    for _ in range(n)],
+        "up": up,
+        "down": down,
+        "neutral": neutral,
+        "fetched_at": "2024-06-01T00:00:00",
+    }
+
+
+def make_sector(symbol, self_ytd, peer_ytds, name="BRVM - TELECOMMUNICATIONS"):
+    peers = [{"symbol": symbol, "name": "Self", "dernier": None,
+              "variation_jour_pct": None, "variation_ytd_pct": self_ytd}]
+    for i, y in enumerate(peer_ytds):
+        peers.append({"symbol": f"P{i}", "name": f"Peer {i}", "dernier": None,
+                      "variation_jour_pct": None, "variation_ytd_pct": y})
+    return {"sector": {"name": name, "peers": peers, "fetched_at": "2024-06-01"}}
+
+
+def test_dividend_history_5y_upgrades_dividend_subscore():
+    perf = {"dividende": {"2023": "500"}}
+    rising = {
+        "performance": perf,
+        "market": {"dividend_history": make_dividend_history(
+            [100, 110, 120, 130, 140], [8.0] * 5)},
+    }
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=rising):
+        res = scoring.score_symbol(SYM_UP)
+    fund = res["fundamentals"]
+    # avg yield 8 % -> base 25, +3 consistency (never cut) -> clamped to 25.
+    assert fund["dividend"] == 25.0, fund
+    assert fund["dividend_yield_avg_5y"] == 0.08, fund
+    assert fund["dividend_history_years"] == 5, fund
+    assert fund["dividend_never_cut"] is True, fund
+    assert any("Rendement moyen du dividende sur 5 ans : 8,0 %" in r
+               for r in res["reasons"]), res["reasons"]
+    assert any("dividende jamais baissé depuis 5 ans" in r
+               for r in res["reasons"]), res["reasons"]
+
+    # Two montant cuts -> base - 3 (avg yield 4 % -> base 18.33).
+    cut = {
+        "performance": perf,
+        "market": {"dividend_history": make_dividend_history(
+            [100, 90, 95, 80, 85], [4.0] * 5)},
+    }
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=cut):
+        res2 = scoring.score_symbol(SYM_UP)
+    base = 5.0 + (0.04 / 0.06) * 20.0
+    assert abs(res2["fundamentals"]["dividend"] - (base - 3.0)) < 0.01, res2["fundamentals"]
+    assert res2["fundamentals"]["dividend_never_cut"] is False
+    assert not any("jamais baissé" in r for r in res2["reasons"])
+
+
+def test_dividend_history_under_3_entries_keeps_legacy_path():
+    perf = {"dividende": {"2023": "500"}}
+    two = {
+        "performance": perf,
+        "market": {"dividend_history": make_dividend_history([100, 110], [9.0, 9.0])},
+    }
+    legacy = {"performance": perf}
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=two):
+        with_two = scoring.score_symbol(SYM_UP)
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=legacy):
+        without = scoring.score_symbol(SYM_UP)
+    assert with_two["fundamentals"] == without["fundamentals"]
+    assert "dividend_yield_avg_5y" not in with_two["fundamentals"]
+    # Legacy single-year yield: 500 / 10 000 = 5 % -> 5 + (5/6)*20.
+    assert abs(with_two["fundamentals"]["dividend"] - 21.67) < 0.01
+    assert with_two["score"] == without["score"]
+    assert with_two["reasons"] == without["reasons"]
+
+
+def test_beta_rebalances_risk_subscore():
+    with patch_loaders(rows=make_rows(UP_PRICES), details={"market": {"beta_1an": 0.7}}):
+        low = scoring.score_symbol(SYM_UP)
+    with patch_loaders(rows=make_rows(UP_PRICES), details={"market": {"beta_1an": 1.31}}):
+        high = scoring.score_symbol(SYM_UP)
+    with patch_loaders(rows=make_rows(UP_PRICES), details={"market": {"beta_1an": 1.0}}):
+        mid = scoring.score_symbol(SYM_UP)
+    with patch_loaders(rows=make_rows(UP_PRICES), details=None):
+        baseline = scoring.score_symbol(SYM_UP)
+
+    assert low["technicals"]["beta_1an"] == 0.7
+    assert high["technicals"]["beta_1an"] == 1.31
+    assert low["technicals"]["risk"] > high["technicals"]["risk"]
+    # UP_PRICES: near-zero volatility, no drawdown -> vol 7 + dd 6 + beta pts.
+    assert abs(low["technicals"]["risk"] - 15.0) < 0.01, low["technicals"]
+    expected_high = 13.0 + 2.0 * (1.5 - 1.31) / 0.7
+    assert abs(high["technicals"]["risk"] - expected_high) < 0.01, high["technicals"]
+    assert abs(mid["technicals"]["risk"] - (13.0 + 2.0 * 0.5 / 0.7)) < 0.01, mid["technicals"]
+    assert any("Bêta 1 an : 0,70 (faible sensibilité au marché)" in r
+               for r in low["reasons"]), low["reasons"]
+    assert any("Bêta 1 an : 1,31 (sensibilité élevée au marché)" in r
+               for r in high["reasons"]), high["reasons"]
+    assert any("Bêta 1 an : 1,00 (sensibilité moyenne au marché)" in r
+               for r in mid["reasons"]), mid["reasons"]
+
+    # Beta None -> byte-identical to the no-details baseline.
+    with patch_loaders(rows=make_rows(UP_PRICES), details={"market": {"beta_1an": None}}):
+        none_beta = scoring.score_symbol(SYM_UP)
+    assert none_beta["technicals"] == baseline["technicals"]
+    assert none_beta["fundamentals"] == baseline["fundamentals"]
+    assert none_beta["score"] == baseline["score"]
+    assert none_beta["reasons"] == baseline["reasons"]
+    assert none_beta["data_warnings"] == baseline["data_warnings"]
+
+
+def test_sika_consensus_adjusts_technicals_block():
+    with patch_loaders(rows=make_rows(UP_PRICES), details=None):
+        base = scoring.score_symbol(SYM_UP)
+    base_block = base["technicals"]["block"]
+
+    details_up = {"technical_analysis": make_technical_analysis(6, 2)}
+    with patch_loaders(rows=make_rows(UP_PRICES), details=details_up):
+        bullish = scoring.score_symbol(SYM_UP)
+    assert abs(bullish["technicals"]["block"] - (base_block + 4.0)) < 0.01, bullish["technicals"]
+    assert bullish["technicals"]["sika_consensus_up"] == 6
+    assert bullish["technicals"]["sika_consensus_down"] == 2
+    assert bullish["technicals"]["sika_consensus_neutral"] == 0
+    assert any("Analyse technique Sika Finance : 6 signaux haussiers, 2 baissiers" in r
+               for r in bullish["reasons"]), bullish["reasons"]
+
+    details_down = {"technical_analysis": make_technical_analysis(1, 5)}
+    with patch_loaders(rows=make_rows(UP_PRICES), details=details_down):
+        bearish = scoring.score_symbol(SYM_UP)
+    assert abs(bearish["technicals"]["block"] - (base_block - 4.0)) < 0.01, bearish["technicals"]
+    assert any("Analyse technique Sika Finance : 1 signaux haussiers, 5 baissiers" in r
+               for r in bearish["reasons"]), bearish["reasons"]
+
+    # Fewer than 3 signals -> no adjustment, no reason, counts still exposed.
+    few = {"technical_analysis": make_technical_analysis(2, 0, signals_count=2)}
+    with patch_loaders(rows=make_rows(UP_PRICES), details=few):
+        res = scoring.score_symbol(SYM_UP)
+    assert res["technicals"]["block"] == base_block
+    assert res["technicals"]["sika_consensus_up"] == 2
+    assert not any("Sika Finance" in r for r in res["reasons"])
+
+    # Balanced consensus (adj == 0) -> no reason either.
+    balanced = {"technical_analysis": make_technical_analysis(2, 2)}
+    with patch_loaders(rows=make_rows(UP_PRICES), details=balanced):
+        res = scoring.score_symbol(SYM_UP)
+    assert res["technicals"]["block"] == base_block
+    assert not any("Sika Finance" in r for r in res["reasons"])
+
+
+def test_sector_context_reason():
+    with patch_loaders(rows=make_rows(UP_PRICES), details=None):
+        baseline = scoring.score_symbol(SYM_UP)
+
+    top = make_sector(SYM_UP, 41.6, [10.0, 20.0])
+    with patch_loaders(rows=make_rows(UP_PRICES), details=top):
+        res = scoring.score_symbol(SYM_UP)
+    sector_reasons = [r for r in res["reasons"] if r.startswith("Secteur ")]
+    assert sector_reasons == [
+        "Secteur TELECOMMUNICATIONS : +41,6 % depuis janvier — 1er du secteur"
+    ], res["reasons"]
+    assert res["reasons"][-1] == sector_reasons[0]  # appended last
+    assert len(res["reasons"]) <= 7
+    assert res["score"] == baseline["score"]  # informational only
+
+    bottom = make_sector(SYM_UP, 5.0, [10.0, 20.0, 30.0, 41.6])
+    with patch_loaders(rows=make_rows(UP_PRICES), details=bottom):
+        res = scoring.score_symbol(SYM_UP)
+    assert any(r.startswith("Secteur TELECOMMUNICATIONS : +5,0 % depuis janvier")
+               and "à la traîne du secteur" in r for r in res["reasons"]), res["reasons"]
+
+    mid = make_sector(SYM_UP, 20.0, [10.0, 41.6])
+    with patch_loaders(rows=make_rows(UP_PRICES), details=mid):
+        res = scoring.score_symbol(SYM_UP)
+    assert any("2e du secteur" in r for r in res["reasons"]), res["reasons"]
+
+    # Sector key absent, or symbol missing from the peer table -> no reason.
+    assert not any(r.startswith("Secteur ") for r in baseline["reasons"])
+    other = make_sector("OTHER", 41.6, [10.0])
+    with patch_loaders(rows=make_rows(UP_PRICES), details=other):
+        res = scoring.score_symbol(SYM_UP)
+    assert not any(r.startswith("Secteur ") for r in res["reasons"])
+
+
+def test_empty_new_containers_are_noop():
+    legacy = {
+        "performance": {
+            "croissance_rn": {"2023": "16,0"},
+            "per": {"2023": "10"},
+            "dividende": {"2023": "500"},
+        }
+    }
+    enriched_empty = dict(legacy, market={}, technical_analysis={}, sector={})
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=legacy):
+        a = scoring.score_symbol(SYM_UP)
+    with patch_loaders(rows=make_rows([10000.0] * 300), details=enriched_empty):
+        b = scoring.score_symbol(SYM_UP)
+    assert a == b
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

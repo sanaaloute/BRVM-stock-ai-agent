@@ -1,0 +1,73 @@
+![menu mobile](/img/vector.png)
+![](/img/icon_search.png)
+![](/img/icon_person.png)
+
+**CONNECTEZ-VOUS**
+
+[Identifiant oublié ?](/users/password)  
+[Créer un compte gratuit](/users/login)
+
+[Liste de valeurs](/listes/displaylist)
+
+[Portefeuille virtuel](/portif/displayp)
+
+[Mon compte](/users/compte)
+
+[Se déconnecter](#)
+
+![sikafinance](/img/logosikafinance_general3.png)
+![Sika Academy](/img/sikaacademybtn.png)
+![Sika Pro](/img/sikaprobtn2.png)
+![ci](/i/ci.png)
+![ci](/i/ci.png)
+![ci](/i/sn.png)
+![cm](/i/cemac.png)
+
+# SONATEL
+
+![](/i/sn.png "Sénégal ")
+
+|  |  |
+| --- | --- |
+| Volume (titres) | 13 615 |
+| Volume ( ) | 503 482 700 |
+| Ouverture | 34 400 |
+| Plus haut | 36 980 |
+| Plus bas | 34 400 |
+| Clôture veille | 34 400 |
+
+|  |  |
+| --- | --- |
+| Beta 1 an | 1,31 |
+| RSI | 86,03 |
+
+|  |  |
+| --- | --- |
+| Capital échangé | 0,01% |
+| Valorisation | 3 698 000 M |
+
+|  | Plus Haut | Plus bas | Variation |
+| --- | --- | --- | --- |
+| 1 semaine | 36 980 | 31 900 | 15,92% |
+| 1 mois | 36 980 | 30 200 | 17,40% |
+| 1er janvier | 36 980 | 24 400 | 41,58% |
+| 1 an | 36 980 | 24 400 | 49,14% |
+| 3 ans | 36 980 | 16 000 | 126,18% |
+| 5 ans | 36 980 | 13 500 | 164,14% |
+
+![](/i/download_icon.png)
+
+| Année | Montant | Rendement |
+| --- | --- | --- |
+| 2025 | 1740,00 | 7,25% |
+| 2024 | 1655,00 | 9,20% |
+| 2023 | 1575,00 | 10,36% |
+| 2022 | 1500,00 | 10,73% |
+| 2021 | 1400,00 | 10,37% |
+
+[Donner / modifier votre avis](#)
+
+![](/i/facebook.png)
+![](/i/twit.png)
+![](/i/linkedin.png)
+![](/i/youtube.png)

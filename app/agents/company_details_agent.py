@@ -32,6 +32,8 @@ def get_company_details_agent_system() -> str:
 
 **Data fields available after get_company_details:** company_name, code, presentation, phone, fax, address, dirigeants, nombre_titres, flottant, valorisation, shareholders (list of name/pct), performance (chiffre_affaires, resultat_net, croissance_ca, croissance_rn, bnpa, per, dividende by year).
 
+**Optional enrichment blocks (present on fresh fiches, absent on older ones — answer from them when present):** market (bêta 1 an, RSI, capital échangé, valorisation, séance du jour, fourchettes 1 semaine→5 ans, historique des dividendes avec rendement), technical_analysis (signaux techniques Sika: tendance/momentum/oscillateurs/volumes_chandeliers avec direction up/down/neutral), sector (secteur BRVM + pairs: dernier cours, variation jour, variation 1er janvier).
+
 **Response:** Summarize in plain language what the user asked (e.g. shareholders, dividends, net result). Do not mention file paths or tool names."""
 
 
