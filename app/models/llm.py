@@ -1,4 +1,4 @@
-"""Unified LLM factory. Supports Ollama, Groq, OpenRouter via LLM_PROVIDER env."""
+"""Unified LLM factory. Supports Ollama and OpenRouter via LLM_PROVIDER env."""
 from __future__ import annotations
 
 import contextlib
@@ -41,13 +41,10 @@ def default_model_for(provider: str) -> str:
     if config.LLM_MODEL:
         return config.LLM_MODEL
     provider = (provider or "").strip().lower()
-    if provider == "ollama":
-        return config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
-    if provider == "groq":
-        return config.GROQ_MODEL
     if provider == "openrouter":
         return config.OPENROUTER_MODEL
-    return config.OLLAMA_MODEL
+    # ollama (default)
+    return config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
 
 
 def get_default_model() -> str:
@@ -57,7 +54,7 @@ def get_default_model() -> str:
 
 def get_llm(model: str | None = None, temperature: float | None = None, **kwargs: Any):
     """
-    Return LLM instance based on the active provider (ollama, groq, openrouter).
+    Return LLM instance based on the active provider (ollama, openrouter).
     Model can be overridden per-call; otherwise uses LLM_MODEL or provider-specific default.
     Temperature defaults to config.LLM_TEMPERATURE (0.0).
 
@@ -74,9 +71,7 @@ def get_llm(model: str | None = None, temperature: float | None = None, **kwargs
         config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
     )
     effective_model = model or config.LLM_MODEL or (
-        ollama_default if provider == "ollama" else
-        config.GROQ_MODEL if provider == "groq" else
-        config.OPENROUTER_MODEL
+        config.OPENROUTER_MODEL if provider == "openrouter" else ollama_default
     )
 
     if kwargs:
@@ -93,25 +88,18 @@ def get_llm(model: str | None = None, temperature: float | None = None, **kwargs
 def _create(provider: str, model: str, temperature: float, **kwargs: Any):
     if provider == "ollama":
         return _ollama(model, temperature, **kwargs)
-    if provider == "groq":
-        return _groq(model, temperature, **kwargs)
     if provider == "openrouter":
         return _openrouter(model, temperature, **kwargs)
 
     raise ValueError(
         f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER}. "
-        "Use: ollama, groq, or openrouter"
+        "Use: ollama or openrouter"
     )
 
 
 def _ollama(model: str | None, temperature: float, **kwargs: Any):
     from .provider_ollama import create_ollama_llm
     return create_ollama_llm(model=model, temperature=temperature, **kwargs)
-
-
-def _groq(model: str | None, temperature: float, **kwargs: Any):
-    from .provider_groq import create_groq_llm
-    return create_groq_llm(model=model, temperature=temperature, **kwargs)
 
 
 def _openrouter(model: str | None, temperature: float, **kwargs: Any):

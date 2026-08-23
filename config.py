@@ -208,7 +208,7 @@ else:
 
 
 
-# LLM provider: ollama | groq | openrouter
+# LLM provider: ollama | openrouter
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower() or "ollama"
 
@@ -270,13 +270,6 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip() or "small"
 
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
 
-
-
-# Groq (https://console.groq.com)
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip() or None
-
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
 
 

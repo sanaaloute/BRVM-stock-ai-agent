@@ -524,7 +524,7 @@ def get_compiled_graph(model: str | None = None, checkpointer: Any | None = None
     return graph
 
 
-# Transient provider errors worth one graph-level retry (openai/groq SDK names;
+# Transient provider errors worth one graph-level retry (openai-compatible SDK names;
 # matched by type name so the SDKs stay optional imports).
 _RETRYABLE_LLM_TYPE_NAMES = {
     "APIConnectionError",

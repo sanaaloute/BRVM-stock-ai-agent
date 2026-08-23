@@ -27,7 +27,7 @@ RealTimeStock/
 │   ├── api/
 │   │   ├── chat.py       # FastAPI: bot → API → agents (auth, quota, rate limit, sanitized errors)
 │   │   └── whatsapp.py   # WhatsApp Business Cloud API webhook (same pipeline)
-│   ├── models/           # LLM providers: ollama | groq | openrouter
+│   ├── models/           # LLM providers: ollama | openrouter
 │   ├── bot/              # Telegram bot (client of the Chat API)
 │   ├── channels/
 │   │   └── whatsapp/     # WhatsApp via Evolution API (webhook, client, service)
@@ -80,7 +80,7 @@ RealTimeStock/
    Edit `.env` and set at least:
 
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com)
-   - LLM provider: `LLM_PROVIDER=ollama|groq|openrouter` + the matching key/model (Ollama local, Ollama Cloud, Groq, or OpenRouter — see `.env.example`)
+   - LLM provider: `LLM_PROVIDER=ollama|openrouter` + the matching key/model (Ollama local, Ollama Cloud, or OpenRouter — see `.env.example`)
 
    For the Telegram bot:
 
@@ -325,6 +325,10 @@ Notes:
 - The worker only forwards Telegram Bot API path shapes (`/bot<token>/…`,
   `/file/bot<token>/…`) — it is not an open relay. Your token passes through
   in the URL path but is never stored; keep the worker URL private anyway.
+- **Groq is not a supported provider**: api.groq.com rejects requests from some
+  regions (e.g. mainland China) with `403 Forbidden` before even checking the
+  API key — verified unfixable even through a Cloudflare worker (in-region edge
+  egress inherits the block). Use OpenRouter and/or Ollama Cloud, which both work.
 - WhatsApp note: the Evolution gateway and Meta's `graph.facebook.com` are also
   unreachable from mainland China. The Meta channel's inbound webhooks can
   arrive through your existing Cloudflare setup (tunnel), but outbound sends
