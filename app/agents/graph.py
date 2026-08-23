@@ -69,7 +69,28 @@ _GROUNDING_SUFFIX = """
 your reply MUST come from a tool output in this conversation. If the tools
 return empty, an error, or missing fields, say plainly that the data is
 unavailable (and which data) — then stop. Do NOT guess, approximate, or fill
-from memory."""
+from memory. This applies to company names too: use the company_name from the
+tool output, or just the symbol — never invent a name."""
+
+# Trailing user-role nudge appended to every worker input: gpt-oss (harmony
+# format) tends to skip tool calls and freestyle from memory when the
+# conversation ends with an assistant message (the [NLU] routing note). Ending
+# the input with a HumanMessage restores tool calling. It is stripped from the
+# worker's output, so it never reaches state or memory.
+_WORKER_NUDGE = (
+    "Réponds à la dernière question de l'utilisateur en appelant les outils "
+    "à ta disposition, puis synthétise le résultat."
+)
+
+# Appended to every worker system prompt: investor-report style rule.
+_STYLE_SUFFIX = """
+
+**Style de réponse (toujours) :** synthèse professionnelle, style rapport
+d'investisseur — la réponse ou le chiffre clé D'ABORD, puis seulement les
+informations utiles à la décision. Pas de dump brut des données, pas de
+séparateurs « --- », pas de détails non demandés (contacts, adresses, fax,
+tableaux année par année…). Structure légère : gras et puces courtes. Maximum
+~15 lignes, sauf si l'utilisateur demande explicitement le détail complet."""
 
 
 def _get_supervisor_system() -> str:
@@ -288,7 +309,7 @@ def _build_worker_node(
             if entities_hint:
                 system_content = system_content.rstrip() + entities_hint
             # Global grounding rule for every worker (hallucination teeth):
-            system_content = system_content.rstrip() + _GROUNDING_SUFFIX
+            system_content = system_content.rstrip() + _GROUNDING_SUFFIX + _STYLE_SUFFIX
             messages = [SystemMessage(content=system_content)] + list(messages)
         else:
             prefix = time_line
@@ -296,6 +317,9 @@ def _build_worker_node(
             if entities_hint:
                 prefix = prefix.rstrip() + entities_hint
             messages = [SystemMessage(content=prefix)] + list(messages)
+        # End the input with a user-role nudge: with the NLU note (assistant
+        # role) last, gpt-oss tends to skip tool calls and answer from memory.
+        messages = messages + [HumanMessage(content=_WORKER_NUDGE)]
         # Forward the run config so tool-level injections (RunnableConfig, e.g.
         # the verified user id for portfolio tools) reach nested agents — also
         # across the multi-worker's thread pool where context vars don't flow.
@@ -305,6 +329,11 @@ def _build_worker_node(
         # state (worker system prompts would accumulate across sequential runs).
         if out_messages and isinstance(out_messages[0], SystemMessage):
             out_messages = out_messages[1:]
+        # Drop the nudge as well: it must never reach state/memory.
+        out_messages = [
+            m for m in out_messages
+            if not (isinstance(m, HumanMessage) and str(getattr(m, "content", "")) == _WORKER_NUDGE)
+        ]
         # Cost guardrail: cap very long tool outputs before they hit state.
         capped: list = []
         for m in out_messages:
@@ -552,7 +581,13 @@ def _is_usable_reply(content: str) -> bool:
     if not text or "[NLU]" in text:
         return False
     # Harmony / tool-call fragments from misparsed tool calls
+    lowered = text.lower()
     if "functions." in text or "to=functions" in text or "tools=" in text:
+        return False
+    if "confidence=" in lowered or "no tool call needed" in lowered:
+        return False
+    # Fragment tails: a real answer never starts with punctuation like ", " / ". "
+    if len(text) < 3 or text[0] in ",.;":
         return False
     # Raw JSON blobs (object or array) served as the answer
     if text[0] in "{[":
@@ -647,6 +682,17 @@ def run_agent(
                     result["_fresh_reply"] = None
                     return result
                 result["_fresh_reply"] = _extract_fresh_reply(result.get("messages") or [], baseline)
+                if (
+                    result["_fresh_reply"] is None
+                    and not result.get("image_path")
+                    and attempt < attempts - 1
+                ):
+                    # The model produced only guarded junk (harmony fragments /
+                    # JSON blobs — intermittent with gpt-oss). Re-roll once on
+                    # the same provider before giving up.
+                    logger.warning("Run produced no usable reply (model junk); re-rolling once.")
+                    time.sleep(1.0)
+                    continue
                 # Success: store only [user, final_ai, ...], last 10
                 new_condensed = _condense_to_user_final_pairs(result.get("messages") or [])
                 try:
@@ -677,17 +723,38 @@ def run_agent(
     except Exception as primary_err:
         if not _is_retryable_llm_error(primary_err):
             raise
-        fallback = (getattr(config, "LLM_FALLBACK_PROVIDER", "") or "").strip().lower()
-        if not fallback or fallback == (config.LLM_PROVIDER or "").strip().lower():
-            raise
-        logger.warning(
-            "Primary LLM provider unavailable (%s); trying fallback provider %s.",
-            primary_err, fallback,
-        )
         from app.models.llm import default_model_for, use_provider
 
-        with use_provider(fallback):
-            fb_graph = get_compiled_graph(
-                model=default_model_for(fallback), checkpointer=checkpointer
-            )
-            return _invoke_with_retries(fb_graph, 1)
+        # Ordered fallback chain (LLM_FALLBACK_PROVIDERS, e.g. "tokenfree,openrouter");
+        # the legacy single LLM_FALLBACK_PROVIDER is merged in if present.
+        chain_raw = getattr(config, "LLM_FALLBACK_PROVIDERS", "") or ""
+        chain = [p.strip().lower() for p in chain_raw.split(",") if p.strip()]
+        legacy = (getattr(config, "LLM_FALLBACK_PROVIDER", "") or "").strip().lower()
+        if legacy and legacy not in chain:
+            chain.append(legacy)
+        primary = (config.LLM_PROVIDER or "").strip().lower()
+        last_err: Exception = primary_err
+        for fb in chain:
+            if not fb or fb == primary:
+                continue
+            try:
+                logger.warning(
+                    "LLM provider unavailable (%s); trying fallback provider %s.",
+                    last_err, fb,
+                )
+                with use_provider(fb):
+                    fb_graph = get_compiled_graph(
+                        model=default_model_for(fb), checkpointer=checkpointer
+                    )
+                    return _invoke_with_retries(fb_graph, 1)
+            except Exception as fb_err:
+                last_err = fb_err
+                if isinstance(fb_err, ValueError):
+                    # Fallback not configured (e.g. missing API key) — skip it
+                    # rather than blocking the rest of the chain.
+                    logger.warning("Fallback provider %s skipped: %s", fb, fb_err)
+                    continue
+                if not _is_retryable_llm_error(fb_err):
+                    raise
+                logger.warning("Fallback provider %s also failed: %s", fb, fb_err)
+        raise last_err

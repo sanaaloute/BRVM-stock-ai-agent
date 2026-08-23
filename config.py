@@ -214,9 +214,15 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower() or "ollama"
 
 
 
-# Fallback provider tried once when the primary's upstream is down (502/overload/
+# Fallback providers tried in order when the primary's upstream is down
 
-# connection). Empty = no fallback. E.g. LLM_FALLBACK_PROVIDER=ollama
+# (502/overload/connection). Ordered, comma-separated. E.g. with
+
+# LLM_PROVIDER=ollama: LLM_FALLBACK_PROVIDERS=tokenfree,openrouter
+
+LLM_FALLBACK_PROVIDERS = os.getenv("LLM_FALLBACK_PROVIDERS", "").strip().lower()
+
+# Legacy single-fallback knob (merged into the chain if set).
 
 LLM_FALLBACK_PROVIDER = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
 
@@ -296,6 +302,16 @@ MEMORY_CLEANUP_INTERVAL_SEC = int(os.getenv("MEMORY_CLEANUP_INTERVAL_SEC", "3600
 # Max condensed messages (user + final AI pairs) kept per conversation thread.
 
 MEMORY_MAX_MESSAGES = int(os.getenv("MEMORY_MAX_MESSAGES", "20").strip() or "20")
+
+
+
+# TokenFree (https://www.tokenfree.com) — OpenAI-compatible API.
+
+TOKENFREE_API_KEY = os.getenv("TOKENFREE_API_KEY", "").strip()
+
+TOKENFREE_MODEL = os.getenv("TOKENFREE_MODEL", "qwen-max").strip() or "qwen-max"
+
+TOKENFREE_BASE_URL = os.getenv("TOKENFREE_BASE_URL", "https://www.tokenfree.com/v1").strip().rstrip("/")
 
 
 

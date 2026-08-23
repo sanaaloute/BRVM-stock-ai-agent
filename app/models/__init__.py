@@ -1,1 +1,1 @@
-"""LLM providers: Ollama, OpenRouter."""
+"""LLM providers: Ollama, TokenFree, OpenRouter."""

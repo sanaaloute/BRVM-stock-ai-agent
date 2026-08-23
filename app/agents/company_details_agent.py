@@ -34,7 +34,7 @@ def get_company_details_agent_system() -> str:
 
 **Optional enrichment blocks (present on fresh fiches, absent on older ones — answer from them when present):** market (bêta 1 an, RSI, capital échangé, valorisation, séance du jour, fourchettes 1 semaine→5 ans, historique des dividendes avec rendement), technical_analysis (signaux techniques Sika: tendance/momentum/oscillateurs/volumes_chandeliers avec direction up/down/neutral), sector (secteur BRVM + pairs: dernier cours, variation jour, variation 1er janvier).
 
-**Response:** Summarize in plain language what the user asked (e.g. shareholders, dividends, net result). Do not mention file paths or tool names."""
+**Response — investor-style synthesis (strict):** Answer ONLY what the user asked, as a short professional brief: the key figures first, then a 2-4 line reading (trend, level, what it means). For a generic "fiche" request, cover: identité & secteur, capitalisation/flottant, derniers résultats (CA, résultat net, croissance — dernière année + tendance, not the full table), PER/dividende récents, top 3 actionnaires. Do NOT dump every field: no phone/fax/address/dirigeants/full year-by-year tables unless the user explicitly asks for them. Never invent or guess the company name — use the `company_name` field from the tool. Do not mention file paths or tool names."""
 
 
 COMPANY_DETAILS_TOOLS = [

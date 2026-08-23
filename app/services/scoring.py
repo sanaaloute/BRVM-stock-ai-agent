@@ -22,7 +22,7 @@ import config
 # Imported into this module's namespace on purpose: tests monkeypatch them here.
 from app.scrapers.sikafinance_company import load_company_details
 from app.utils._data import fetch_palmares, load_series
-from app.utils.brvm_companies import get_valid_symbols
+from app.utils.brvm_companies import get_symbol_to_name, get_valid_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -692,6 +692,9 @@ def score_symbol(
     sym = (symbol or "").strip().upper()
     out: dict[str, Any] = {
         "symbol": sym,
+        # Official company name from the BRVM list — so the LLM never has to
+        # invent it (hallucination guard, e.g. ETIT = Ecobank Transnational).
+        "company_name": get_symbol_to_name().get(sym) or None,
         "score": None,
         "signal": None,
         "reasons": [],

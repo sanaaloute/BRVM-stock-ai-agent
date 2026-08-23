@@ -27,7 +27,7 @@ RealTimeStock/
 │   ├── api/
 │   │   ├── chat.py       # FastAPI: bot → API → agents (auth, quota, rate limit, sanitized errors)
 │   │   └── whatsapp.py   # WhatsApp Business Cloud API webhook (same pipeline)
-│   ├── models/           # LLM providers: ollama | openrouter
+│   ├── models/           # LLM providers: ollama | tokenfree | openrouter
 │   ├── bot/              # Telegram bot (client of the Chat API)
 │   ├── channels/
 │   │   └── whatsapp/     # WhatsApp via Evolution API (webhook, client, service)
@@ -80,7 +80,7 @@ RealTimeStock/
    Edit `.env` and set at least:
 
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com)
-   - LLM provider: `LLM_PROVIDER=ollama|openrouter` + the matching key/model (Ollama local, Ollama Cloud, or OpenRouter — see `.env.example`)
+   - LLM provider: `LLM_PROVIDER=ollama|tokenfree|openrouter` + the matching key/model (Ollama local, Ollama Cloud, TokenFree, or OpenRouter — see `.env.example`). Optional ordered fallback chain on upstream outages: `LLM_FALLBACK_PROVIDERS=tokenfree,openrouter` (each fallback is tried once, in order, when the primary provider's upstream is down).
 
    For the Telegram bot:
 

@@ -270,6 +270,11 @@ def test_fresh_reply_guard_rejects_model_junk():
     # Harmony-format tool-call fragments rejected
     assert not _is_usable_reply(", tools=functions.get_stock_metrics\n")
     assert not _is_usable_reply('to=functions.get_market_overview {"top_n": 1}')
+    assert not _is_usable_reply(", confidence=0.99")
+    assert not _is_usable_reply(". No tool call needed.")
+    # Fragment tails (leading punctuation) and near-empty content rejected
+    assert not _is_usable_reply(", voici la réponse")
+    assert not _is_usable_reply("ok")
     # Empty / whitespace rejected
     assert not _is_usable_reply("   ")
     # Prose that merely starts with a brace but isn't JSON stays usable
@@ -315,10 +320,15 @@ def test_llm_fallback_provider_kicks_in():
         return _PrimaryGraph() if calls["n"] == 1 else _FallbackGraph()
 
     real_compile = g.get_compiled_graph
-    saved = (config.LLM_PROVIDER, getattr(config, "LLM_FALLBACK_PROVIDER", ""))
+    saved = (
+        config.LLM_PROVIDER,
+        getattr(config, "LLM_FALLBACK_PROVIDER", ""),
+        getattr(config, "LLM_FALLBACK_PROVIDERS", ""),
+    )
     g.get_compiled_graph = _fake_compile
     config.LLM_PROVIDER = "openrouter"
     config.LLM_FALLBACK_PROVIDER = "ollama"
+    config.LLM_FALLBACK_PROVIDERS = ""
     try:
         res = g.run_agent(query="test", thread_id="fallback-test")
         assert res.get("_fresh_reply") == "réponse de secours", res.get("_fresh_reply")
@@ -333,7 +343,169 @@ def test_llm_fallback_provider_kicks_in():
             pass
     finally:
         g.get_compiled_graph = real_compile
-        config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER = saved
+        (config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER, config.LLM_FALLBACK_PROVIDERS) = saved
+
+
+# --- h. Fallback CHAIN: primary -> fallback1 (fails) -> fallback2 (wins) -------
+def test_llm_fallback_chain_order():
+    import httpx
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import app.agents.graph as g
+
+    class _State:
+        values = {}
+
+    class _FailGraph:
+        def get_state(self, cfg):
+            return _State()
+
+        def update_state(self, *a, **k):
+            pass
+
+        def invoke(self, *a, **k):
+            raise httpx.ConnectError("upstream overloaded")
+
+    class _OkGraph(_FailGraph):
+        def invoke(self, *a, **k):
+            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse openrouter")]}
+
+    # compile #1 = primary (fails twice), #2 = tokenfree (fails once), #3 = openrouter (wins)
+    graphs = [_FailGraph(), _FailGraph(), _OkGraph()]
+    calls = {"n": 0}
+
+    def _fake_compile(**kwargs):
+        g_ = graphs[min(calls["n"], len(graphs) - 1)]
+        calls["n"] += 1
+        return g_
+
+    real_compile = g.get_compiled_graph
+    saved = (
+        config.LLM_PROVIDER,
+        getattr(config, "LLM_FALLBACK_PROVIDER", ""),
+        getattr(config, "LLM_FALLBACK_PROVIDERS", ""),
+    )
+    g.get_compiled_graph = _fake_compile
+    config.LLM_PROVIDER = "ollama"
+    config.LLM_FALLBACK_PROVIDER = ""
+    config.LLM_FALLBACK_PROVIDERS = "tokenfree,openrouter"
+    try:
+        res = g.run_agent(query="test", thread_id="chain-test")
+        assert res.get("_fresh_reply") == "réponse openrouter", res.get("_fresh_reply")
+        assert calls["n"] == 3, calls
+
+        # An UNCONFIGURED middle fallback (ValueError, e.g. missing API key)
+        # must be skipped — not block the rest of the chain.
+        def _compile_with_unconfigured(**kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise ValueError("TOKENFREE_API_KEY is required for the TokenFree provider.")
+            return _FailGraph() if calls["n"] == 1 else _OkGraph()
+
+        calls["n"] = 0
+        g.get_compiled_graph = _compile_with_unconfigured
+        res = g.run_agent(query="test", thread_id="chain-test-2")
+        assert res.get("_fresh_reply") == "réponse openrouter", res.get("_fresh_reply")
+        assert calls["n"] == 3, calls
+    finally:
+        g.get_compiled_graph = real_compile
+        (config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER, config.LLM_FALLBACK_PROVIDERS) = saved
+
+
+# --- i. TokenFree provider: dispatch + required key ---------------------------
+def test_tokenfree_provider():
+    import app.models.llm as llmmod
+
+    assert llmmod.default_model_for("tokenfree") == config.TOKENFREE_MODEL
+
+    saved_key = getattr(config, "TOKENFREE_API_KEY", "")
+    try:
+        config.TOKENFREE_API_KEY = ""
+        try:
+            with llmmod.use_provider("tokenfree"):
+                llmmod.get_llm()
+            raise AssertionError("expected ValueError without TOKENFREE_API_KEY")
+        except ValueError as e:
+            assert "TOKENFREE_API_KEY" in str(e)
+        # With a key, the client builds (no network at construction)
+        config.TOKENFREE_API_KEY = "tf-test-key"
+        with llmmod.use_provider("tokenfree"):
+            llm = llmmod.get_llm()
+        assert getattr(llm, "model_name", None) == config.TOKENFREE_MODEL or \
+            getattr(llm, "model", None) == config.TOKENFREE_MODEL
+        assert "tokenfree.com" in str(getattr(llm, "openai_api_base", "") or getattr(llm, "base_url", ""))
+    finally:
+        config.TOKENFREE_API_KEY = saved_key
+
+
+# --- i. Junk-reply re-roll: one same-provider retry on guarded junk ------------
+def test_junk_reply_rerolls_once():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import app.agents.graph as g
+
+    class _State:
+        values = {}
+
+    class _JunkThenGoodGraph:
+        def __init__(self):
+            self.calls = 0
+
+        def get_state(self, cfg):
+            return _State()
+
+        def update_state(self, *a, **k):
+            pass
+
+        def invoke(self, *a, **k):
+            self.calls += 1
+            if self.calls == 1:
+                return {"messages": [HumanMessage(content="q"), AIMessage(content=", confidence=0.99")]}
+            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse propre")]}
+
+    graph = _JunkThenGoodGraph()
+    real_compile = g.get_compiled_graph
+    g.get_compiled_graph = lambda **kwargs: graph
+    try:
+        res = g.run_agent(query="test", thread_id="junk-test")
+        assert res.get("_fresh_reply") == "réponse propre", res.get("_fresh_reply")
+        assert graph.calls == 2, graph.calls
+    finally:
+        g.get_compiled_graph = real_compile
+
+
+# --- j. Worker nudge: appended to input, stripped from output ----------------
+def test_worker_nudge_appended_and_stripped():
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    import app.agents.graph as g
+
+    captured: dict = {}
+
+    class _FakeAgent:
+        def invoke(self, payload, config=None):
+            captured["msgs"] = list(payload["messages"])
+            return {"messages": list(payload["messages"]) + [AIMessage(content="réponse")]}
+
+    def _builder(model=None):
+        return _FakeAgent()
+
+    node = g._build_worker_node(_builder, model="m", worker_name="w", prepend_system="SYS")
+    state = {"messages": [HumanMessage(content="question?"), AIMessage(content="[NLU] intent=x")]}
+    out = node(state)
+
+    # The agent input ends with the nudge (HumanMessage) — this is what makes
+    # gpt-oss call tools instead of freestyling on the trailing NLU note.
+    assert isinstance(captured["msgs"][-1], HumanMessage)
+    assert captured["msgs"][-1].content == g._WORKER_NUDGE
+    assert isinstance(captured["msgs"][0], SystemMessage)
+    assert "NEVER invent data" in captured["msgs"][0].content
+
+    # Output carries neither the nudge nor the system prompt.
+    contents = [str(getattr(m, "content", "")) for m in out["messages"]]
+    assert g._WORKER_NUDGE not in contents
+    assert not any("NEVER invent data" in c for c in contents)
+    assert contents == ["question?", "[NLU] intent=x", "réponse"], contents
 
 
 if __name__ == "__main__":

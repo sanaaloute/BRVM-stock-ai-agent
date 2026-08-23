@@ -58,6 +58,7 @@ def _get_stock_advice(symbol: str, **kwargs: Any) -> str:
     return json.dumps(
         {
             "symbol": sym,
+            "company_name": result.get("company_name"),
             "score": result.get("score"),
             "signal": result.get("signal"),
             "reasons": (result.get("reasons") or [])[:5],
@@ -80,6 +81,7 @@ def _get_market_recommendations(top_n: int = 5, **kwargs: Any) -> str:
     def _brief(entry: dict) -> dict:
         return {
             "symbol": entry.get("symbol"),
+            "company_name": entry.get("company_name"),
             "score": entry.get("score"),
             "signal": entry.get("signal"),
             "reasons": (entry.get("reasons") or [])[:2],
@@ -120,6 +122,7 @@ def _get_portfolio_advice(*, config: RunnableConfig, **kwargs: Any) -> str:
         advice.append(
             {
                 "symbol": sym,
+                "company_name": scored.get("company_name"),
                 "gain_loss_pct": pos.get("gain_loss_pct"),
                 "score": scored.get("score"),
                 "signal": scored.get("signal"),

@@ -1,4 +1,4 @@
-"""Unified LLM factory. Supports Ollama and OpenRouter via LLM_PROVIDER env."""
+"""Unified LLM factory. Supports Ollama, TokenFree, OpenRouter via LLM_PROVIDER env."""
 from __future__ import annotations
 
 import contextlib
@@ -43,6 +43,8 @@ def default_model_for(provider: str) -> str:
     provider = (provider or "").strip().lower()
     if provider == "openrouter":
         return config.OPENROUTER_MODEL
+    if provider == "tokenfree":
+        return config.TOKENFREE_MODEL
     # ollama (default)
     return config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
 
@@ -54,7 +56,7 @@ def get_default_model() -> str:
 
 def get_llm(model: str | None = None, temperature: float | None = None, **kwargs: Any):
     """
-    Return LLM instance based on the active provider (ollama, openrouter).
+    Return LLM instance based on the active provider (ollama, tokenfree, openrouter).
     Model can be overridden per-call; otherwise uses LLM_MODEL or provider-specific default.
     Temperature defaults to config.LLM_TEMPERATURE (0.0).
 
@@ -71,7 +73,9 @@ def get_llm(model: str | None = None, temperature: float | None = None, **kwargs
         config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
     )
     effective_model = model or config.LLM_MODEL or (
-        config.OPENROUTER_MODEL if provider == "openrouter" else ollama_default
+        config.OPENROUTER_MODEL if provider == "openrouter" else
+        config.TOKENFREE_MODEL if provider == "tokenfree" else
+        ollama_default
     )
 
     if kwargs:
@@ -90,16 +94,23 @@ def _create(provider: str, model: str, temperature: float, **kwargs: Any):
         return _ollama(model, temperature, **kwargs)
     if provider == "openrouter":
         return _openrouter(model, temperature, **kwargs)
+    if provider == "tokenfree":
+        return _tokenfree(model, temperature, **kwargs)
 
     raise ValueError(
         f"Unknown LLM_PROVIDER: {config.LLM_PROVIDER}. "
-        "Use: ollama or openrouter"
+        "Use: ollama, tokenfree, or openrouter"
     )
 
 
 def _ollama(model: str | None, temperature: float, **kwargs: Any):
     from .provider_ollama import create_ollama_llm
     return create_ollama_llm(model=model, temperature=temperature, **kwargs)
+
+
+def _tokenfree(model: str | None, temperature: float, **kwargs: Any):
+    from .provider_tokenfree import create_tokenfree_llm
+    return create_tokenfree_llm(model=model, temperature=temperature, **kwargs)
 
 
 def _openrouter(model: str | None, temperature: float, **kwargs: Any):
