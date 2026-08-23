@@ -126,7 +126,7 @@ async def _digest_job(context) -> None:
 
     try:
 
-        from app.bot.telegram_bot import MAX_MESSAGE_LENGTH
+        from app.bot.telegram_bot import split_text
 
         from app.services.digest import run_digest
 
@@ -144,11 +144,9 @@ async def _digest_job(context) -> None:
 
             try:
 
-                if len(text) > MAX_MESSAGE_LENGTH:
+                for chunk in split_text(text):
 
-                    text = text[: MAX_MESSAGE_LENGTH - 20] + "\n\n… (tronqué)"
-
-                await context.bot.send_message(chat_id=telegram_id, text=text)
+                    await context.bot.send_message(chat_id=telegram_id, text=chunk)
 
                 logger.info("Digest sent to user %s", telegram_id)
 

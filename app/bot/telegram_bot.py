@@ -33,12 +33,36 @@ logger = logging.getLogger(__name__)
 RETRYABLE_ERRORS = (NetworkError, TimedOut, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.ConnectTimeout, OSError)
 
 MAX_MESSAGE_LENGTH = 4096  # Telegram limit
-MAX_CAPTION_LENGTH = 1024  # Telegram photo caption limit
+CHART_CAPTION_CHARS = 50  # chart captions stay short; the full reply goes in text messages
 VOICE_LANGUAGE = "fr-FR"  # BRVM / West Africa; use "en-US" for English
 API_TIMEOUT = 300.0  # Agent + LLM can take several minutes (NLU, supervisor, workers)
 STATUS_UPDATE_INTERVAL_SEC = 5  # Update "please wait" message every N seconds
 WAIT_SPINNER = ("◐", "◓", "◑", "◒")
 WAIT_MESSAGE = "Veuillez patienter — je récupère les données BRVM. Cela peut prendre jusqu'à une minute."
+
+
+def split_text(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
+    """Split a long reply on line boundaries so each chunk fits one Telegram message."""
+    chunks: list[str] = []
+    text = text or ""
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        chunks.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        chunks.append(text)
+    return chunks
+
+
+def _short_caption(caption: str | None, suffix: str = "") -> str:
+    """Chart caption kept under CHART_CAPTION_CHARS, with room for an optional ' (1/2)' suffix."""
+    base = (caption or "").strip() or "📊 Graphique"
+    budget = CHART_CAPTION_CHARS - len(suffix)
+    if len(base) > budget:
+        base = base[: budget - 1].rstrip() + "…"
+    return base + suffix
 
 
 def _is_local_api() -> bool:
@@ -211,24 +235,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     reply = result.get("reply", "")
-    if len(reply) > MAX_MESSAGE_LENGTH:
-        reply = reply[: MAX_MESSAGE_LENGTH - 20] + "\n\n… (tronqué)"
-
-    image_base64 = result.get("image_base64")
-    if not reply and not image_base64:
+    images = result.get("images_base64") or ([result["image_base64"]] if result.get("image_base64") else [])
+    if not reply and not images:
         # Telegram rejects an empty edit_text (BadRequest): use a fallback.
         reply = "Je n'ai pas pu générer de réponse. Réessayez dans un instant."
-    if image_base64:
-        caption = reply[:MAX_CAPTION_LENGTH] if len(reply) <= MAX_CAPTION_LENGTH else reply[: MAX_CAPTION_LENGTH - 20] + "\n… (tronqué)"
+    chunks = split_text(reply) if reply else []
+
+    if images:
+        # Chart(s) first with a short caption (< 50 chars), then the full reply
+        # as text message(s): Telegram captions are limited and would truncate
+        # the analysis.
         await status.delete()
-        try:
-            img_bytes = base64.b64decode(image_base64)
-            await update.message.reply_photo(photo=img_bytes, caption=caption or None)
-        except Exception as e:
-            logger.warning("Failed to send image: %s", e)
-            await update.message.reply_text(reply)
+        caption = result.get("image_caption")
+        for i, image_b64 in enumerate(images):
+            suffix = f" ({i + 1}/{len(images)})" if len(images) > 1 else ""
+            try:
+                img_bytes = base64.b64decode(image_b64)
+                await update.message.reply_photo(photo=img_bytes, caption=_short_caption(caption, suffix))
+            except Exception as e:
+                logger.warning("Failed to send image: %s", e)
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
     else:
-        await status.edit_text(reply)
+        await status.edit_text(chunks[0])
+        for chunk in chunks[1:]:
+            await update.message.reply_text(chunk)
 
 
 TELEGRAM_CONNECT_TIMEOUT = 30.0

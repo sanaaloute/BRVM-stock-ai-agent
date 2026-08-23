@@ -179,6 +179,10 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     image_base64: str | None = None
+    images_base64: list[str] | None = None
+    """All charts of this run (image_base64 mirrors the first, for older clients)."""
+    image_caption: str | None = None
+    """Short (≤ 50 chars) chart caption; the full reply is sent as text."""
     clarification: bool = False
 
 
@@ -362,16 +366,25 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
         reply = redact_for_telegram(raw_reply)
         reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
 
-        image_base64 = None
-        image_path = result.get("image_path")
-        if image_path and Path(image_path).exists():
+        image_paths = result.get("image_paths") or []
+        if not image_paths and result.get("image_path"):
+            image_paths = [result["image_path"]]
+        images_base64: list[str] = []
+        for image_path in image_paths:
+            if not image_path or not Path(image_path).exists():
+                continue
             try:
                 with open(image_path, "rb") as f:
-                    image_base64 = base64.b64encode(f.read()).decode("ascii")
+                    images_base64.append(base64.b64encode(f.read()).decode("ascii"))
             finally:
                 Path(image_path).unlink(missing_ok=True)
 
-        return ChatResponse(reply=reply, image_base64=image_base64)
+        return ChatResponse(
+            reply=reply,
+            image_base64=images_base64[0] if images_base64 else None,
+            images_base64=images_base64 or None,
+            image_caption=result.get("image_caption") if images_base64 else None,
+        )
     except Exception as e:
         if counted:
             try:

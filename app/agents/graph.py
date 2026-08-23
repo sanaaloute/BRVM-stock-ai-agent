@@ -27,7 +27,12 @@ from app.agents.state import AgentState, NextWorker, WorkerName
 CHAT_MEMORY_DB = Path(__file__).resolve().parent.parent / "data" / "chat_memory.db"
 from app.agents.utils import get_time_prefix
 from app.agents.analytics_agent import create_analytics_agent, get_analytics_agent_system
-from app.agents.charts_agent import create_charts_agent, _extract_image_path_from_messages, get_charts_agent_system
+from app.agents.charts_agent import (
+    create_charts_agent,
+    _extract_chart_caption_from_messages,
+    _extract_image_paths_from_messages,
+    get_charts_agent_system,
+)
 from app.agents.news_agent import create_news_agent, get_news_agent_system
 from app.agents.nlu_agent import create_nlu_node
 from app.agents.scraper_agent import create_scraper_agent, get_scraper_agent_system
@@ -350,9 +355,13 @@ def _build_worker_node(
         _log_tools_from_messages(out_messages, worker_name)
         out: dict = {"messages": out_messages, "next": "FINISH", "last_worker": worker_name}
         if extract_image_path:
-            path = _extract_image_path_from_messages(out_messages)
-            if path:
-                out["image_path"] = path
+            paths = _extract_image_paths_from_messages(out_messages)
+            if paths:
+                out["image_paths"] = paths
+                out["image_path"] = paths[-1]
+                caption = _extract_chart_caption_from_messages(out_messages)
+                if caption:
+                    out["image_caption"] = caption
         return out
 
     return node
@@ -415,6 +424,8 @@ def _build_multi_worker_node(
 
         messages = list(state.get("messages") or [])
         image_path = state.get("image_path")
+        image_paths: list[str] = list(state.get("image_paths") or [])
+        image_caption = state.get("image_caption")
         valid = {"scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor"}
         workers = [w for w in workers if w in valid and w in worker_nodes]
 
@@ -442,6 +453,11 @@ def _build_multi_worker_node(
                         all_new.append(m)
                 if res.get("image_path") and not image_path:
                     image_path = res["image_path"]
+                for p in res.get("image_paths") or []:
+                    if p not in image_paths:
+                        image_paths.append(p)
+                if res.get("image_caption") and not image_caption:
+                    image_caption = res["image_caption"]
             out_messages = messages + all_new
         else:
             # Sequential: run each worker, pass accumulated state to next
@@ -453,6 +469,14 @@ def _build_multi_worker_node(
                     current["messages"] = result["messages"]
                 if result.get("image_path"):
                     current["image_path"] = result["image_path"]
+                    image_path = result["image_path"]
+                for p in result.get("image_paths") or []:
+                    if p not in image_paths:
+                        image_paths.append(p)
+                if result.get("image_caption") and not image_caption:
+                    image_caption = result["image_caption"]
+                current["image_paths"] = list(image_paths)
+                current["image_caption"] = image_caption
             out_messages = current.get("messages") or messages
 
         out: dict = {
@@ -464,6 +488,10 @@ def _build_multi_worker_node(
         }
         if image_path:
             out["image_path"] = image_path
+        if image_paths:
+            out["image_paths"] = image_paths
+        if image_caption:
+            out["image_caption"] = image_caption
         return out
 
     return multi_worker
@@ -641,6 +669,8 @@ def run_agent(
         # otherwise leak the previous run's routing/image/clarification state
         # (e.g. a stale image_path pointing at a since-deleted chart file).
         "image_path": None,
+        "image_paths": None,
+        "image_caption": None,
         "next": None,
         "multi_workers": [],
         "multi_parallel": False,

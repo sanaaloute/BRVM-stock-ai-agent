@@ -26,6 +26,7 @@ from app.utils.news import (
     get_market_news as get_market_news_svc,
 )
 from app.utils.plots import plot_timeseries as plot_timeseries_service
+from app.utils.plots import plot_timeseries_multi as plot_timeseries_multi_service
 from app.utils.market_overview import get_brvm_market_overview
 from app.utils.brvm_basics import get_brvm_basics
 from app.utils.brvm_companies import (
@@ -321,9 +322,37 @@ def _plot_company_chart(
     start_date: str,
     end_date: str,
     chart_type: str = "line",
+    symbols: str | None = None,
     **kwargs: Any,
 ) -> str:
     ct = "area" if (chart_type or "").strip().lower() == "area" else "line"
+    # Comparison mode: several symbols on ONE chart. The primary `symbol` is
+    # always part of the list even if the model omitted it from `symbols`.
+    syms: list[str] = []
+    for s in (symbols or "").split(","):
+        s = s.strip().upper()
+        if s and s not in syms:
+            syms.append(s)
+    primary = (symbol or "").strip().upper()
+    if primary and primary not in syms:
+        syms.insert(0, primary)
+    if len(syms) >= 2:
+        data = plot_timeseries_multi_service(syms, start_date, end_date, chart_type=ct)
+        if not data.get("image_path"):
+            return json.dumps(data, ensure_ascii=False, default=str)
+        return json.dumps(
+            {
+                "image_path": data.get("image_path"),
+                "symbols": data.get("symbols"),
+                "missing_symbols": data.get("missing_symbols"),
+                "start_date": data.get("start_date"),
+                "end_date": data.get("end_date"),
+                "points_count": data.get("points_count"),
+                "message": f"Graphique comparatif enregistré. Envoyez l'image à {data.get('image_path')} avec votre explication.",
+            },
+            ensure_ascii=False,
+            default=str,
+        )
     data = plot_timeseries_service(symbol, start_date, end_date, chart_type=ct)
     if data.get("error") and not data.get("image_path"):
         return json.dumps(data, ensure_ascii=False, default=str)
@@ -421,7 +450,7 @@ ensure_all_timeseries_tool = StructuredTool.from_function(
 plot_company_chart_tool = StructuredTool.from_function(
     func=_plot_company_chart,
     name="plot_company_chart",
-    description="Plot price chart for a company over a date range. Uses most up-to-date CSV. Returns image_path (temp file) and summary. Chart types: line, area.",
+    description="Plot price chart for a company over a date range. Uses most up-to-date CSV. Returns image_path (temp file) and summary. Chart types: line, area. To compare several companies on ONE chart, pass symbols='S1,S2'.",
     args_schema=PlotCompanyChartInput,
 )
 

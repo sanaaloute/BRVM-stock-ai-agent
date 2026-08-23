@@ -19,6 +19,10 @@ class AgentState(TypedDict, total=False):
     """Structural marker set by worker nodes ("multi" for the multi_worker); the
     supervisor FINISHes without an LLM call when it is set, then clears it."""
     image_path: str | None
+    image_paths: list[str] | None
+    """All charts produced this run (several when the user asked for separate charts)."""
+    image_caption: str | None
+    """Short (≤ 50 chars) chart caption, e.g. '📊 ETIT, SNTS · 01/06/2026–23/08/2026'."""
     structured_data: dict[str, Any] | None
     clarification: str | None
     conversation_summary: str | None

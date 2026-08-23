@@ -82,6 +82,10 @@ class PlotCompanyChartInput(BaseModel):
         default="line",
         description="Chart type: line or area.",
     )
+    symbols: str | None = Field(
+        default=None,
+        description="Comma-separated symbols (e.g. 'ETIT,SNTS') to compare several companies on the SAME chart. Use for comparisons; omit for a single company.",
+    )
 
 
 class GetCompanyNewsInput(BaseModel):
