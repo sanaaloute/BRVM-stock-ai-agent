@@ -268,6 +268,18 @@ OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "2m").strip() or "2m"
 
 
 
+# Thinking/reasoning mode for thinking-capable Ollama models. Empty = model
+
+# default. "true"/"false" force on/off; "low"/"medium"/"high" set the effort
+
+# level (gpt-oss only — high = best accuracy, more latency). Reasoning content
+
+# goes to a separate channel, keeping the answer itself clean.
+
+OLLAMA_REASONING = os.getenv("OLLAMA_REASONING", "").strip().lower()
+
+
+
 # Voice notes: local faster-whisper transcription (primary; Google Speech fallback).
 
 # small int8 ~250MB download, ~1GB RAM peak, good French accuracy on CPU.

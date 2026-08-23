@@ -54,18 +54,30 @@ class BaseScraper(ABC):
             raise
 
     def extract_content(self) -> str:
-        """Get raw text content from Tavily response (results[].raw_content or content).
-        Replaces \\xa0 (non-breaking space) with empty string for clean parsing and JSON output.
-        """
-        raw = self.fetch_raw()
-        if not isinstance(raw, dict):
-            return str(raw).strip().replace("\xa0", "")
-        results = raw.get("results", [])
-        if isinstance(results, list) and results:
-            first = results[0]
-            if isinstance(first, dict):
-                content = (first.get("raw_content") or first.get("content") or "").strip()
-                return content.replace("\xa0", "")
+        """Get raw text content: Tavily extract first; on failure/empty, fall back
+        to Ollama Cloud web_fetch (e.g. sources that block Tavily). Replaces \\xa0
+        (non-breaking space) with empty string for clean parsing and JSON output."""
+        content = ""
+        try:
+            raw = self.fetch_raw()
+            if not isinstance(raw, dict):
+                content = str(raw).strip()
+            else:
+                results = raw.get("results", [])
+                if isinstance(results, list) and results:
+                    first = results[0]
+                    if isinstance(first, dict):
+                        content = (first.get("raw_content") or first.get("content") or "").strip()
+        except Exception as e:
+            logger.warning("Tavily extract failed for %s: %s — trying Ollama web_fetch.", self.url, e)
+        if content:
+            return content.replace("\xa0", "")
+        from app.utils.ollama_web import web_fetch
+
+        data = web_fetch(self.url)
+        if data:
+            logger.info("Ollama web_fetch fallback succeeded for %s", self.url)
+            return str(data["content"]).strip().replace("\xa0", "")
         return ""
 
     @abstractmethod

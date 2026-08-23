@@ -39,9 +39,28 @@ def create_ollama_llm(model: str | None = None, temperature: float = 0, **kwargs
         "client_kwargs": client_kwargs,
         **kwargs,
     }
+    # Thinking mode (gpt-oss): "low"/"medium"/"high" effort, or true/false.
+    # Reasoning lands in additional_kwargs["reasoning_content"], keeping the
+    # answer channel clean.
+    reasoning = _parse_reasoning(getattr(config, "OLLAMA_REASONING", ""))
+    if reasoning is not None:
+        llm_kwargs["reasoning"] = reasoning
     if base_url:
         llm_kwargs["base_url"] = base_url
     return ChatOllama(**llm_kwargs)
+
+
+def _parse_reasoning(value: str) -> bool | str | None:
+    v = (value or "").strip().lower()
+    if not v or v in ("none", "off", "0"):
+        return None
+    if v in ("1", "true", "yes"):
+        return True
+    if v in ("false", "no"):
+        return False
+    if v in ("low", "medium", "high"):
+        return v
+    return None
 
 
 def _parse_keep_alive(value: str) -> str | int:
