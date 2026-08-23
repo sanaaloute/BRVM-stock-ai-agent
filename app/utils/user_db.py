@@ -21,7 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db import engine as db_engine
 from app.db import migrate as db_migrate
 from app.db import models
-from app.utils._data import fetch_palmares
+from app.utils._data import fetch_palmares, load_price_on_or_before
 from app.utils.brvm_companies import get_valid_symbols
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "brvm_bot.db"
@@ -224,12 +224,21 @@ def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
 
 
 def _current_price(symbol: str) -> float | None:
-    """Current price from palmarès for one symbol."""
+    """Live quote from the palmarès; on a closed market (weekend / before the
+    ~15:00 GMT close) cours_actuel is empty — fall back to cours_veille, then
+    to the last close from the time series."""
     stocks = fetch_palmares(period="veille", progression="tout")
     for s in stocks:
         if (s.get("symbol") or "").strip().upper() == symbol:
-            return s.get("cours_actuel")
-    return None
+            price = s.get("cours_actuel")
+            if price is not None:
+                return price
+            veille = s.get("cours_veille")
+            if veille is not None:
+                return veille
+            break
+    row = load_price_on_or_before(symbol, date.today())
+    return row["price"] if row else None
 
 
 def portfolio_with_prices(telegram_id: int) -> list[dict[str, Any]]:

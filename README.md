@@ -292,3 +292,42 @@ of your own portfolio and tracking symbols.
 
   `<project>` is the compose project name (the directory name by default — check with `docker volume ls`). Restoring a dump into an existing database can conflict with rows that are already there; for a clean recovery, restore into a freshly initialized database/volume.
 - **External watchdog** — point a monitoring service (e.g. healthchecks.io) at the api's `/health` endpoint, and its cron monitoring at the backup job, so a dead stack or a missed backup alerts you.
+
+## Running the bot where Telegram is blocked (e.g. mainland China)
+
+`api.telegram.org` is unreachable from some networks, and a system-wide VPN on
+the host would hijack unrelated services. The fix here routes **only Telegram
+traffic** through a Cloudflare Worker reverse proxy — everything else on the
+host stays direct.
+
+1. Deploy the worker (free tier is enough; polling ≈ 30k requests/day):
+
+   ```bash
+   cd cloudflare/telegram-api-proxy
+   npx wrangler login
+   npx wrangler deploy        # note the https://<name>.<subdomain>.workers.dev URL
+   ```
+
+   (Or paste `worker.js` into a new worker in the Cloudflare dashboard →
+   Workers & Pages → Create → edit code.)
+
+2. Set in `.env`:
+
+   ```bash
+   TELEGRAM_BASE_URL=https://telegram-api-proxy.<your-subdomain>.workers.dev
+   ```
+
+3. Restart the stack (`docker compose up -d`). The bot now polls and sends
+   through the worker — including voice-note file downloads
+   (`base_file_url` is routed too). Nothing else on the host changes.
+
+Notes:
+- The worker only forwards Telegram Bot API path shapes (`/bot<token>/…`,
+  `/file/bot<token>/…`) — it is not an open relay. Your token passes through
+  in the URL path but is never stored; keep the worker URL private anyway.
+- WhatsApp note: the Evolution gateway and Meta's `graph.facebook.com` are also
+  unreachable from mainland China. The Meta channel's inbound webhooks can
+  arrive through your existing Cloudflare setup (tunnel), but outbound sends
+  would need the same proxy treatment — ask if you run the WhatsApp channels
+  and we'll extend this pattern.
+

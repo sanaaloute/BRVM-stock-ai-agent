@@ -329,6 +329,22 @@ async def _global_error_handler(update: object, context: ContextTypes.DEFAULT_TY
 POLL_INTERVAL_SEC = 1
 
 
+def _telegram_base_urls() -> tuple[str | None, str | None]:
+    """(base_url, base_file_url) for the Bot API, or (None, None) for defaults.
+
+    When TELEGRAM_BASE_URL is set (e.g. a Cloudflare Worker reverse proxy, see
+    cloudflare/telegram-api-proxy/), BOTH API calls and file downloads (voice
+    notes) go through it — for hosts from which api.telegram.org is unreachable.
+    PTB expects the ``/bot`` (resp. ``/file/bot``) suffix included: it appends
+    ``<token>/<method>`` directly.
+    """
+    base = getattr(config, "TELEGRAM_BASE_URL", "") or ""
+    base = base.strip().rstrip("/")
+    if not base:
+        return None, None
+    return f"{base}/bot", f"{base}/file/bot"
+
+
 def build_application() -> Application:
     request = HTTPXRequest(
         connect_timeout=TELEGRAM_CONNECT_TIMEOUT,
@@ -340,6 +356,10 @@ def build_application() -> Application:
         .token(config.TELEGRAM_BOT_TOKEN)
         .request(request)
     )
+    base_url, base_file_url = _telegram_base_urls()
+    if base_url:
+        logger.info("Telegram Bot API via custom base URL: %s", base_url)
+        builder = builder.base_url(base_url).base_file_url(base_file_url)
     app = builder.build()
     app.add_error_handler(_global_error_handler)
     app.add_handler(CommandHandler("help", cmd_help))
@@ -395,6 +415,11 @@ def run_polling_with_retry(
                 delay,
                 attempt,
             )
+            # PTB's run_polling closes the thread's event loop on exit; retrying
+            # against the closed loop dies instantly with "Event loop is closed".
+            # Give the next attempt a fresh loop (asyncio.get_event_loop() returns
+            # the closed one on Python < 3.14).
+            asyncio.set_event_loop(asyncio.new_event_loop())
             time.sleep(delay)
         except Exception:
             raise

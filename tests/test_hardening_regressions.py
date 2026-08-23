@@ -253,6 +253,89 @@ def test_chat_serializes_per_thread():
         config.RATE_LIMIT_PER_MINUTE, config.DAILY_FREE_QUOTA = saved_cfg
 
 
+# --- f. Reply guard: JSON blobs / tool-call fragments never reach the user ----
+def test_fresh_reply_guard_rejects_model_junk():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.agents.graph import _extract_fresh_reply, _is_usable_reply
+
+    # Prose passes
+    assert _is_usable_reply("Le cours de NTLC est de 17 000 F CFA.")
+    # NLU routing note rejected
+    assert not _is_usable_reply("[NLU] intent=price_query")
+    # Raw JSON object/array rejected (the Telegram regression)
+    assert not _is_usable_reply('{"price": 22500, "currency": "F CFA"}')
+    assert not _is_usable_reply('{"top_n": 1}')
+    assert not _is_usable_reply('[{"symbol": "NTLC"}]')
+    # Harmony-format tool-call fragments rejected
+    assert not _is_usable_reply(", tools=functions.get_stock_metrics\n")
+    assert not _is_usable_reply('to=functions.get_market_overview {"top_n": 1}')
+    # Empty / whitespace rejected
+    assert not _is_usable_reply("   ")
+    # Prose that merely starts with a brace but isn't JSON stays usable
+    assert _is_usable_reply("{Rappel} le marché ouvre à 9h.")
+
+    base = [HumanMessage(content="q")]
+    # Last fresh message is junk -> fall through to the previous usable one
+    msgs = base + [AIMessage(content="Le cours est de 100 F CFA."), AIMessage(content='{"top_n": 1}')]
+    assert _extract_fresh_reply(msgs, len(base)) == "Le cours est de 100 F CFA."
+    # Only junk produced -> None (caller returns the generic error, never JSON)
+    msgs = base + [AIMessage(content='{"price": 22500}')]
+    assert _extract_fresh_reply(msgs, len(base)) is None
+
+
+# --- g. LLM provider fallback: retry on second provider when primary is down ---
+def test_llm_fallback_provider_kicks_in():
+    import httpx
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import app.agents.graph as g
+
+    class _State:
+        values = {}
+
+    class _PrimaryGraph:
+        def get_state(self, cfg):
+            return _State()
+
+        def update_state(self, *a, **k):
+            pass
+
+        def invoke(self, *a, **k):
+            raise httpx.ConnectError("upstream overloaded")
+
+    class _FallbackGraph(_PrimaryGraph):
+        def invoke(self, *a, **k):
+            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse de secours")]}
+
+    calls = {"n": 0}
+
+    def _fake_compile(**kwargs):
+        calls["n"] += 1
+        return _PrimaryGraph() if calls["n"] == 1 else _FallbackGraph()
+
+    real_compile = g.get_compiled_graph
+    saved = (config.LLM_PROVIDER, getattr(config, "LLM_FALLBACK_PROVIDER", ""))
+    g.get_compiled_graph = _fake_compile
+    config.LLM_PROVIDER = "openrouter"
+    config.LLM_FALLBACK_PROVIDER = "ollama"
+    try:
+        res = g.run_agent(query="test", thread_id="fallback-test")
+        assert res.get("_fresh_reply") == "réponse de secours", res.get("_fresh_reply")
+        assert calls["n"] == 2, calls  # primary graph + fallback graph compiled
+        # Without a fallback configured, the retryable error must propagate
+        config.LLM_FALLBACK_PROVIDER = ""
+        calls["n"] = 0
+        try:
+            g.run_agent(query="test", thread_id="fallback-test-2")
+            raise AssertionError("expected the error to propagate without fallback")
+        except httpx.ConnectError:
+            pass
+    finally:
+        g.get_compiled_graph = real_compile
+        config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER = saved
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

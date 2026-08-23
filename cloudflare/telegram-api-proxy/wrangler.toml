@@ -1,0 +1,9 @@
+name = "telegram-api-proxy"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# Custom domain: *.workers.dev is unreachable from some networks (e.g. mainland
+# China), so the worker is served on a domain hosted on this Cloudflare account.
+routes = [
+  { pattern = "telegram-api-proxy.ai-web-builder.com", custom_domain = true }
+]

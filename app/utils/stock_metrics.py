@@ -6,6 +6,7 @@ from typing import Any
 
 from app.utils._data import fetch_palmares, load_price_on_or_before
 from app.utils.brvm_companies import get_valid_symbols
+from app.utils.market_hours import expected_data_date, market_note
 
 
 def get_stock_metrics(
@@ -49,6 +50,19 @@ def get_stock_metrics(
                     out["loss_pct"] = -var if var < 0 else None
                 out["at_time"] = "current"
                 break
+        # BRVM timing: before the ~15:00 GMT close (and on weekends) sources
+        # show the LAST close; the palmarès may even lack a price cell for a
+        # symbol on those days. Fall back to the last close from the series.
+        if out["price"] is None:
+            row = load_price_on_or_before(symbol, date.today())
+            if row:
+                out["price"] = row["price"]
+                out["price_date"] = row["date"].isoformat()
+                out["source"] = "timeseries_last_close"
+        # Always attach the timing semantics so the LLM phrases the answer
+        # correctly (dernière clôture vs clôture du jour).
+        out["market_note"] = market_note()
+        out["data_as_of"] = expected_data_date().isoformat()
         return out
 
     # Historical: resolve date and look up in series

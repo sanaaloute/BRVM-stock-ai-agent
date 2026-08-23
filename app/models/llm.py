@@ -1,6 +1,8 @@
 """Unified LLM factory. Supports Ollama, Groq, OpenRouter via LLM_PROVIDER env."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import threading
 from typing import Any
 
@@ -12,12 +14,33 @@ import config
 _llm_cache: dict[tuple[str, str, float], Any] = {}
 _llm_cache_lock = threading.Lock()
 
+# Provider override for the fallback path (run_agent retries on a second
+# provider when the primary's upstream is down). ContextVar: set during graph
+# compile + invoke of the fallback attempt; workers use compile-time clients.
+_provider_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "llm_provider_override", default=None
+)
 
-def get_default_model() -> str:
-    """Return default model for current LLM_PROVIDER."""
+
+@contextlib.contextmanager
+def use_provider(provider: str):
+    """Temporarily override the LLM provider resolved by get_llm/get_default_model."""
+    token = _provider_override.set((provider or "").strip().lower() or None)
+    try:
+        yield
+    finally:
+        _provider_override.reset(token)
+
+
+def _active_provider() -> str:
+    return (_provider_override.get() or config.LLM_PROVIDER or "ollama").strip().lower()
+
+
+def default_model_for(provider: str) -> str:
+    """Default model for a GIVEN provider (fallback graph construction)."""
     if config.LLM_MODEL:
         return config.LLM_MODEL
-    provider = (config.LLM_PROVIDER or "ollama").strip().lower()
+    provider = (provider or "").strip().lower()
     if provider == "ollama":
         return config.OLLAMA_CLOUD_MODEL if config.OLLAMA_CLOUD else config.OLLAMA_MODEL
     if provider == "groq":
@@ -27,9 +50,14 @@ def get_default_model() -> str:
     return config.OLLAMA_MODEL
 
 
+def get_default_model() -> str:
+    """Return default model for the active LLM provider."""
+    return default_model_for(_active_provider())
+
+
 def get_llm(model: str | None = None, temperature: float | None = None, **kwargs: Any):
     """
-    Return LLM instance based on LLM_PROVIDER (ollama, groq, openrouter).
+    Return LLM instance based on the active provider (ollama, groq, openrouter).
     Model can be overridden per-call; otherwise uses LLM_MODEL or provider-specific default.
     Temperature defaults to config.LLM_TEMPERATURE (0.0).
 
@@ -38,7 +66,7 @@ def get_llm(model: str | None = None, temperature: float | None = None, **kwargs
     """
     if temperature is None:
         temperature = config.LLM_TEMPERATURE
-    provider = (config.LLM_PROVIDER or "ollama").strip().lower()
+    provider = _active_provider()
     # Use explicit model arg, then LLM_MODEL env, else provider default.
     # In Ollama Cloud mode the local OLLAMA_MODEL tag must not be sent to
     # ollama.com — the cloud model wins unless explicitly overridden.

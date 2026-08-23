@@ -174,6 +174,18 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 
 
+# Optional: custom base URL for the Telegram Bot API, e.g. a Cloudflare Worker
+
+# reverse proxy (see cloudflare/telegram-api-proxy/) for hosts from which
+
+# api.telegram.org is unreachable. Empty = official https://api.telegram.org.
+
+# Used for both API calls and file downloads (voice notes).
+
+TELEGRAM_BASE_URL = os.getenv("TELEGRAM_BASE_URL", "").strip().rstrip("/")
+
+
+
 _raw_symbols = os.getenv("TIMESERIES_SYMBOLS", "").strip()
 
 if _raw_symbols:
@@ -199,6 +211,14 @@ else:
 # LLM provider: ollama | groq | openrouter
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower() or "ollama"
+
+
+
+# Fallback provider tried once when the primary's upstream is down (502/overload/
+
+# connection). Empty = no fallback. E.g. LLM_FALLBACK_PROVIDER=ollama
+
+LLM_FALLBACK_PROVIDER = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
 
 # Optional: override model for current provider (e.g. LLM_MODEL=llama-3.1-70b)
 

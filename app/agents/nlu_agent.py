@@ -33,6 +33,8 @@ def _nlu_system_prompt() -> str:
 {brvm_list}
 Unknown symbol or other exchange → CLARIFY.
 
+**Company names:** when the user names a company from this list (e.g. SONATEL, Nestlé, Solibra, Ecobank), map it to its symbol DIRECTLY (intent company_details/price_query etc., entities.symbol set) — do NOT CLARIFY. Clarify only when the name is absent from the list or truly ambiguous between several listed companies.
+
 **General market questions (NO symbol required):** For "most expensive stock", "highest price stock", "lowest price stock", "cheapest stock", "what is the cheapest?", "should I buy the lowest price stock?" — use intent **market_overview**, suggested_worker **analytics**, and leave entities empty or omit symbol. Do NOT ask for a symbol; the analytics worker will compute from all BRVM stocks.
 
 **How-to questions about this assistant (portfolio, tracking list, price alerts):** When the user asks HOW to do something (e.g. "comment ajouter une action à mon portefeuille ?", "how do I set a price alert?"), the question deserves an ANSWER, not just a bare counter-question. Reply with `CLARIFY:` followed by BOTH:
@@ -40,6 +42,8 @@ Unknown symbol or other exchange → CLARIFY.
 2. A follow-up question inviting the user to do it now (asking for the missing details: symbol, buy price/date, target price...).
 Example — User: "Comment ajouter une action à mon portefeuille ?"
 CLARIFY: Pour ajouter une action à votre portefeuille, donnez-moi simplement son symbole BRVM (ex. ETIT, NTLC, SNTS). Idéalement, précisez aussi le prix et la date d'achat pour un suivi de performance précis. Quelle action voulez-vous ajouter ?
+
+**Compound action requests:** when the user gives ALL the information in one message (e.g. "ajoute SNTS à ma liste de suivi puis préviens-moi quand NTLC atteint 18000"), do NOT ask for confirmation — output the intents directly (multi-intent is fine: tracking_add + target_set with their entities). Clarify only when required details are MISSING (symbol, price, date).
 
 **Intents (exact):** market_overview | price_query | compare | chart | metrics | news | prediction | scrape | update_timeseries | brvm_basics | portfolio_display | portfolio_add | portfolio_remove | tracking_list | tracking_add | target_set | target_list | sgi | company_details | advice | general
 

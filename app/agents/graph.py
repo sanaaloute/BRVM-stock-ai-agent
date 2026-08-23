@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import re
 import threading
@@ -60,6 +61,15 @@ SUPERVISOR_SYSTEM_TEMPLATE = """BRVM router. Output one label only. {time_line}
 
 **Output:** Reply with ONLY the label(s), nothing else — one of SCRAPER | ANALYTICS | TIMESERIES | CHARTS | NEWS | PREDICTION | PORTFOLIO | SGI | COMPANY_DETAILS | ADVISOR | FINISH
 (For multi: ANALYTICS,NEWS or SCRAPER|CHARTS — max 2 workers, do NOT include TIMESERIES in multi.)"""
+
+# Appended to every worker system prompt: absolute anti-hallucination rule.
+_GROUNDING_SUFFIX = """
+
+**NEVER invent data.** Every number, price, date, score, reason, name or URL in
+your reply MUST come from a tool output in this conversation. If the tools
+return empty, an error, or missing fields, say plainly that the data is
+unavailable (and which data) — then stop. Do NOT guess, approximate, or fill
+from memory."""
 
 
 def _get_supervisor_system() -> str:
@@ -277,6 +287,8 @@ def _build_worker_node(
             entities_hint = _entities_hint(structured_data)
             if entities_hint:
                 system_content = system_content.rstrip() + entities_hint
+            # Global grounding rule for every worker (hallucination teeth):
+            system_content = system_content.rstrip() + _GROUNDING_SUFFIX
             messages = [SystemMessage(content=system_content)] + list(messages)
         else:
             prefix = time_line
@@ -531,13 +543,34 @@ def _is_retryable_llm_error(exc: BaseException) -> bool:
     return type(exc).__name__ in _RETRYABLE_LLM_TYPE_NAMES
 
 
+def _is_usable_reply(content: str) -> bool:
+    """False for model-output junk that must never reach the user:
+    raw JSON blobs and harmony/tool-call fragments (e.g. gpt-oss emitting
+    ', tools=functions.get_stock_metrics' or '{"top_n": 1}' as content when a
+    provider fails to parse tool calls). A legit reply is French prose."""
+    text = (content or "").strip()
+    if not text or "[NLU]" in text:
+        return False
+    # Harmony / tool-call fragments from misparsed tool calls
+    if "functions." in text or "to=functions" in text or "tools=" in text:
+        return False
+    # Raw JSON blobs (object or array) served as the answer
+    if text[0] in "{[":
+        try:
+            json.loads(text)
+            return False
+        except (ValueError, TypeError):
+            pass  # starts with { but not valid JSON — prose can look like that
+    return True
+
+
 def _extract_fresh_reply(messages: list, baseline: int) -> str | None:
     """Content of the last AIMessage produced by THIS run (messages[baseline:])
-    with non-empty content and no internal [NLU] routing note. None if none."""
+    that is usable as a user-facing reply (see _is_usable_reply). None if none."""
     for m in reversed(messages[baseline:]):
         if isinstance(m, AIMessage):
             content = str(getattr(m, "content", "") or "")
-            if content.strip() and "[NLU]" not in content:
+            if _is_usable_reply(content):
                 return content
     return None
 
@@ -601,37 +634,60 @@ def run_agent(
         except Exception as upd_err:
             logger.warning("Could not persist clarification turn: %s", upd_err)
 
-    # At most 2 attempts: one graph-level retry, only for transient LLM errors.
-    for attempt in range(2):
-        try:
-            result = graph.invoke(initial, config=run_config)
-            if result.get("clarification"):
-                _persist_clarification(result["clarification"])
-                # Clarification travels via result["clarification"], not _fresh_reply.
-                result["_fresh_reply"] = None
-                return result
-            result["_fresh_reply"] = _extract_fresh_reply(result.get("messages") or [], baseline)
-            # Success: store only [user, final_ai, ...], last 10
-            new_condensed = _condense_to_user_final_pairs(result.get("messages") or [])
+    # At most 2 attempts per provider: one graph-level retry, only for
+    # transient LLM errors. If a fallback provider is configured and the
+    # primary's upstream is down (e.g. overloaded free tier), try once on it.
+    def _invoke_with_retries(g, attempts: int) -> dict:
+        for attempt in range(attempts):
             try:
-                graph.update_state(run_config, {"messages": new_condensed})
-            except Exception as upd_err:
-                logger.warning("Could not update state with condensed messages: %s", upd_err)
-            return result
-        except Exception as e:
-            _revert_messages()
-            if "recursion" in str(e).lower() or "GraphRecursionError" in type(e).__name__:
-                logger.warning("Graph hit recursion limit, returning partial result: %s", e)
+                result = g.invoke(initial, config=run_config)
+                if result.get("clarification"):
+                    _persist_clarification(result["clarification"])
+                    # Clarification travels via result["clarification"], not _fresh_reply.
+                    result["_fresh_reply"] = None
+                    return result
+                result["_fresh_reply"] = _extract_fresh_reply(result.get("messages") or [], baseline)
+                # Success: store only [user, final_ai, ...], last 10
+                new_condensed = _condense_to_user_final_pairs(result.get("messages") or [])
                 try:
-                    state = graph.get_state(run_config)
-                    vals = state.values or {}
-                    if vals and vals.get("messages"):
-                        vals["_fresh_reply"] = _extract_fresh_reply(vals.get("messages") or [], baseline)
-                        return vals
-                except Exception as get_err:
-                    logger.warning("Could not get partial state: %s", get_err)
-            if attempt == 0 and _is_retryable_llm_error(e):
-                time.sleep(2.0)
-                continue
+                    g.update_state(run_config, {"messages": new_condensed})
+                except Exception as upd_err:
+                    logger.warning("Could not update state with condensed messages: %s", upd_err)
+                return result
+            except Exception as e:
+                _revert_messages()
+                if "recursion" in str(e).lower() or "GraphRecursionError" in type(e).__name__:
+                    logger.warning("Graph hit recursion limit, returning partial result: %s", e)
+                    try:
+                        state = g.get_state(run_config)
+                        vals = state.values or {}
+                        if vals and vals.get("messages"):
+                            vals["_fresh_reply"] = _extract_fresh_reply(vals.get("messages") or [], baseline)
+                            return vals
+                    except Exception as get_err:
+                        logger.warning("Could not get partial state: %s", get_err)
+                if attempt < attempts - 1 and _is_retryable_llm_error(e):
+                    time.sleep(2.0)
+                    continue
+                raise
+        raise RuntimeError("Agent invocation failed")
+
+    try:
+        return _invoke_with_retries(graph, 2)
+    except Exception as primary_err:
+        if not _is_retryable_llm_error(primary_err):
             raise
-    raise RuntimeError("Agent invocation failed")
+        fallback = (getattr(config, "LLM_FALLBACK_PROVIDER", "") or "").strip().lower()
+        if not fallback or fallback == (config.LLM_PROVIDER or "").strip().lower():
+            raise
+        logger.warning(
+            "Primary LLM provider unavailable (%s); trying fallback provider %s.",
+            primary_err, fallback,
+        )
+        from app.models.llm import default_model_for, use_provider
+
+        with use_provider(fallback):
+            fb_graph = get_compiled_graph(
+                model=default_model_for(fallback), checkpointer=checkpointer
+            )
+            return _invoke_with_retries(fb_graph, 1)

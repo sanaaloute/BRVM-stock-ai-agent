@@ -5,6 +5,7 @@ from typing import Any
 
 from app.utils._data import fetch_palmares
 from app.utils.brvm_companies import get_valid_symbols, get_symbol_to_name, get_symbol_to_sector
+from app.utils.market_hours import expected_data_date, market_note
 
 
 def _filter_brvm(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -17,6 +18,9 @@ def get_brvm_market_overview(top_n: int = 10) -> dict[str, Any]:
     """
     Return BRVM market overview from palmarès: top stocks by volume, top gainers, top losers.
     Only includes symbols from the official BRVM list (data/BRVM_Companies.xlsx).
+    Price rankings use cours_actuel when published, else cours_veille (last close:
+    weekends and before the ~15:00 GMT closing), so they never come back empty on
+    a closed market.
     """
     stocks = fetch_palmares(period="veille", progression="tout")
     brvm_only = _filter_brvm(stocks)
@@ -25,11 +29,15 @@ def get_brvm_market_overview(top_n: int = 10) -> dict[str, Any]:
 
     def _enrich(s: dict[str, Any]) -> dict[str, Any]:
         sym = (s.get("symbol") or "").strip().upper()
+        cours = s.get("cours_actuel")
+        cours_veille = s.get("cours_veille")
         row = {
             "symbol": sym,
             "company_name": symbol_to_name.get(sym) or s.get("name") or sym,
             "volume": s.get("volume"),
-            "cours_actuel": s.get("cours_actuel"),
+            "cours_actuel": cours,
+            # Effective ranked price: live quote when present, else last close.
+            "price": cours if cours is not None else cours_veille,
             "variation_pct": s.get("variation_pct"),
             "capitalisation": s.get("capitalisation"),
         }
@@ -46,16 +54,16 @@ def get_brvm_market_overview(top_n: int = 10) -> dict[str, Any]:
         key=lambda x: (x["volume"] is None, -(x["volume"] or 0)),
     )[:top_n]
 
-    # Highest prices (most expensive stocks) — by cours_actuel descending
+    # Highest prices (most expensive stocks) — by effective price descending
     highest_prices = sorted(
-        [e for e in enriched if e.get("cours_actuel") is not None],
-        key=lambda x: -(x["cours_actuel"] or 0),
+        [e for e in enriched if e.get("price") is not None],
+        key=lambda x: -(x["price"] or 0),
     )[:top_n]
 
-    # Lowest prices (cheapest stocks) — by cours_actuel ascending, exclude zero
+    # Lowest prices (cheapest stocks) — by effective price ascending, exclude zero
     lowest_prices = sorted(
-        [e for e in enriched if e.get("cours_actuel") is not None and (e["cours_actuel"] or 0) > 0],
-        key=lambda x: (x["cours_actuel"] or 0),
+        [e for e in enriched if e.get("price") is not None and (e["price"] or 0) > 0],
+        key=lambda x: (x["price"] or 0),
     )[:top_n]
 
     # Top gainers (variation_pct descending, positive first)
@@ -72,6 +80,8 @@ def get_brvm_market_overview(top_n: int = 10) -> dict[str, Any]:
 
     return {
         "source": "BRVM palmarès (Rich Bourse)",
+        "data_as_of": expected_data_date().isoformat(),
+        "market_note": market_note(),
         "top_by_volume": by_volume,
         "highest_prices": highest_prices,
         "lowest_prices": lowest_prices,

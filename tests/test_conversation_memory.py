@@ -74,7 +74,7 @@ class MultiTurnFake(GenericFakeChatModel):
         return self
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        blob = " ".join(str(m.content) for m in messages)[:6000]
+        blob = " ".join(str(m.content) for m in messages)[:8000]  # window must cover the full NLU prompt + current message
         if "BRVM stock assistant NLU" in blob:
             self.nlu_prompts.append(blob)
             if "Current user message: ETIT" in blob:
