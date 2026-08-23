@@ -41,6 +41,27 @@ chat_mod.run_agent = _ok_agent
 client = TestClient(chat_mod.app)
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_agent_and_key():
+    """Under pytest, pin this module's fake agent, API key and usage DB per
+    test: other test modules patch chat_mod.run_agent / config.API_SECRET_KEY /
+    user_db.DB_PATH too, and the module-level pins above only hold at
+    collection time."""
+    old = chat_mod.run_agent
+    old_db_path = user_db.DB_PATH
+    chat_mod.run_agent = _ok_agent
+    config.API_SECRET_KEY = "k"
+    user_db.DB_PATH = _tmp
+    try:
+        yield
+    finally:
+        chat_mod.run_agent = old
+        user_db.DB_PATH = old_db_path
+
+
 def _post(user, key="k"):
     return client.post(
         "/chat",

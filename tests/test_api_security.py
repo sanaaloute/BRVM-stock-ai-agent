@@ -31,6 +31,21 @@ chat_mod.run_agent = _fake_run_agent
 client = TestClient(chat_mod.app)
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_fake_agent():
+    """Under pytest, each test gets THIS module's fake agent regardless of the
+    import/run order (other test modules patch chat_mod.run_agent too)."""
+    old = chat_mod.run_agent
+    chat_mod.run_agent = _fake_run_agent
+    try:
+        yield
+    finally:
+        chat_mod.run_agent = old
+
+
 def _post(query="price of NTLC?", key=None, user=42):
     headers = {"X-API-Key": key} if key else {}
     return client.post(

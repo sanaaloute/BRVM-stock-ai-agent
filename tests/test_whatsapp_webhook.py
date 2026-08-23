@@ -42,6 +42,21 @@ chat_mod.run_agent = _ok_agent
 client = TestClient(chat_mod.app)
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_fake_agent():
+    """Under pytest, each test gets THIS module's fake agent regardless of the
+    import/run order (other test modules patch chat_mod.run_agent too)."""
+    old = chat_mod.run_agent
+    chat_mod.run_agent = _ok_agent
+    try:
+        yield
+    finally:
+        chat_mod.run_agent = old
+
+
 def _post(payload):
     """POST a webhook payload the way Meta does: raw bytes + HMAC-SHA256 signature."""
     body = json.dumps(payload).encode("utf-8")

@@ -320,3 +320,19 @@ if __name__ == "__main__":
             print(f"FAIL {t.__name__}: {e}")
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
     sys.exit(1 if failed else 0)
+
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _pin_fake_agent():
+    """Under pytest, each test gets THIS module's fake agent regardless of the
+    import/run order (other test modules patch chat_mod.run_agent too)."""
+    old = chat_mod.run_agent
+    chat_mod.run_agent = _ok_agent
+    try:
+        yield
+    finally:
+        chat_mod.run_agent = old

@@ -14,11 +14,21 @@ sys.path.insert(0, str(ROOT))
 
 
 def _stub(name, **attrs):
-    mod = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(mod, k, v)
-    sys.modules[name] = mod
-    return mod
+    """Stub a third-party module ONLY when it is genuinely missing.
+
+    Under pytest the venv provides bs4/requests/etc.: installing a bare stub
+    into sys.modules at collection time leaks into every other test module
+    (e.g. test_scraper_fixtures getting 'cannot import name ResultSet').
+    Standalone runs on a bare Python install still get the stubs.
+    """
+    try:
+        return __import__(name)
+    except ImportError:
+        mod = types.ModuleType(name)
+        for k, v in attrs.items():
+            setattr(mod, k, v)
+        sys.modules[name] = mod
+        return mod
 
 
 # Stub third-party modules needed by the import chain (never really called).

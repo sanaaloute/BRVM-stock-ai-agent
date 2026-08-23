@@ -26,9 +26,23 @@ class _FakeChatOllama:
 
 # create_ollama_llm imports langchain_ollama lazily inside the function, so
 # installing the fake into sys.modules before the calls is enough.
+_real_langchain_ollama = sys.modules.get("langchain_ollama")
 _fake = types.ModuleType("langchain_ollama")
 _fake.ChatOllama = _FakeChatOllama
 sys.modules["langchain_ollama"] = _fake
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_langchain_ollama():
+    """Keep the fake module-local: without this, the sys.modules entry installed
+    above at collection time leaks into every other test module of the suite."""
+    yield
+    if _real_langchain_ollama is not None:
+        sys.modules["langchain_ollama"] = _real_langchain_ollama
+    else:
+        sys.modules.pop("langchain_ollama", None)
 
 from app.models.llm import get_default_model, get_llm  # noqa: E402
 from app.models.provider_ollama import create_ollama_llm  # noqa: E402
