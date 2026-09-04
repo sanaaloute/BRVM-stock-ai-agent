@@ -96,6 +96,43 @@ def _parse_markdown_table_line(line: str) -> dict[str, Any] | None:
         return None
 
 
+# Header-cell text (normalized) → canonical row key. Rich Bourse has changed
+# the column order more than once (e.g. inserting "Cours actuel / Cours de la
+# veille" before Volume), so parsing is driven by the header row, not positions.
+_HEADER_ALIASES = {
+    "symbole": "symbol",
+    "action": "name",
+    "variation": "variation_pct",
+    "cours actuel": "cours_actuel",
+    "cours de la veille": "cours_veille",
+    "volume": "volume",
+    "valeur (fcfa)": "value_fcfa",
+    "valeur %": "value_pct",
+    "capitalisation": "capitalisation",
+}
+
+
+def _build_column_map(texts: list[str]) -> dict[str, int] | None:
+    """Map canonical row keys to cell indices from a header row; None if no header."""
+    colmap: dict[str, int] = {}
+    for i, raw in enumerate(texts):
+        key = _HEADER_ALIASES.get(re.sub(r"\s+", " ", (raw or "").strip().lower()))
+        if key and key not in colmap:
+            colmap[key] = i
+    return colmap or None
+
+
+def _row_plausible(row: dict[str, Any]) -> bool:
+    """Sanity check: turnover (value_fcfa) must be roughly price × volume.
+    Rich Bourse column reshuffles used to silently misalign values; this
+    invariant catches them. Skipped when any of the three is missing/zero
+    (e.g. no trades)."""
+    cours, vol, val = row.get("cours_actuel"), row.get("volume"), row.get("value_fcfa")
+    if not cours or not vol or not val:
+        return True
+    return 0.2 * cours * vol <= val <= 5 * cours * vol
+
+
 class RichBourseScraper(BaseScraper):
     """Fetch stock variation table from Rich Bourse (palmarès des actions)."""
 
@@ -167,6 +204,7 @@ class RichBourseScraper(BaseScraper):
 
         # --- Table: class="table table-striped table-bordered t" ---
         tables = soup.select("table.table-striped.table-bordered") or soup.find_all("table")
+        colmap: dict[str, int] | None = None
         for table in tables:
             rows = table.find_all("tr")
             for tr in rows:
@@ -176,15 +214,46 @@ class RichBourseScraper(BaseScraper):
                 texts = [c.get_text(strip=True) for c in cells]
                 joined = " ".join(texts)
 
-                # Skip header row (contains "Symbole" or "Variation")
+                # Header row: capture the column layout (positions vary between
+                # site redesigns) and skip it.
                 if re.search(r"symbole|variation|volume|valeur\s*\(?\s*fcfa", joined, re.IGNORECASE):
+                    colmap = _build_column_map(texts) or colmap
                     continue
 
                 # Skip TOTAL row
-                if "TOTAL" == (texts[1] if len(texts) > 1 else "").strip():
+                if any(t.strip() == "TOTAL" for t in texts):
                     continue
 
-                # Data row: symbol (4–5 letters), name, variation %, volume, value_fcfa, cours_actuel, cours_veille, capitalisation
+                if colmap:
+                    # Header-driven extraction.
+                    def cell(key: str) -> str:
+                        idx = colmap.get(key)
+                        return texts[idx] if idx is not None and idx < len(texts) else ""
+
+                    sym = cell("symbol").strip()
+                    if len(sym) not in (4, 5) or not sym.isalpha():
+                        continue
+                    try:
+                        row = {
+                            "symbol": sym,
+                            "name": cell("name").strip(),
+                            "variation_pct": _parse_float(cell("variation_pct")),
+                            "cours_actuel": _parse_int(cell("cours_actuel")),
+                            "cours_veille": _parse_int(cell("cours_veille")),
+                            "volume": _parse_int(cell("volume")),
+                            "value_fcfa": _parse_int(cell("value_fcfa")),
+                            "capitalisation": _parse_int(cell("capitalisation")),
+                        }
+                        if _row_plausible(row):
+                            out["stocks"].append(row)
+                        else:
+                            logger.warning("Drop implausible row %s: %s", sym, row)
+                    except (ValueError, TypeError):
+                        logger.debug("Skip row: %s", texts[:9])
+                    continue
+
+                # Legacy positional layout (no header found): sym, name, var%,
+                # volume, value_fcfa, cours_actuel, cours_veille, capitalisation
                 sym = (texts[0] or "").strip()
                 if len(sym) not in (4, 5) or not sym.isalpha():
                     continue
@@ -210,7 +279,9 @@ class RichBourseScraper(BaseScraper):
                 except (ValueError, TypeError):
                     logger.debug("Skip row: %s", texts[:8])
 
-        # Fallback 1: parse from text blocks (soup.get_text gives rows as 8 newline-separated values)
+        # Fallback 1: parse from text blocks (soup.get_text gives rows as newline-separated values).
+        # Layouts seen: 8 fields (legacy: volume before value) and 9 fields (current:
+        # cours actuel / cours de la veille before volume, plus "Valeur %").
         if not out["stocks"]:
             blocks = re.split(r"\n\s*\n+", text)
             for block in blocks:
@@ -227,16 +298,32 @@ class RichBourseScraper(BaseScraper):
                 if "%" not in (lines[2] or ""):
                     continue
                 try:
-                    out["stocks"].append({
-                        "symbol": sym,
-                        "name": (lines[1] or "").strip(),
-                        "variation_pct": _parse_float(lines[2]),
-                        "volume": _parse_int(lines[3]),
-                        "value_fcfa": _parse_int(lines[4]),
-                        "cours_actuel": _parse_int(lines[5]),
-                        "cours_veille": _parse_int(lines[6]),
-                        "capitalisation": _parse_int(lines[7]),
-                    })
+                    if len(lines) >= 9 and "%" in (lines[8] or ""):
+                        # Current layout: sym name var cours veille volume value value% cap
+                        row = {
+                            "symbol": sym,
+                            "name": (lines[1] or "").strip(),
+                            "variation_pct": _parse_float(lines[2]),
+                            "cours_actuel": _parse_int(lines[3]),
+                            "cours_veille": _parse_int(lines[4]),
+                            "volume": _parse_int(lines[5]),
+                            "value_fcfa": _parse_int(lines[6]),
+                            "capitalisation": _parse_int(lines[8]),
+                        }
+                    else:
+                        # Legacy layout: sym name var volume value cours veille cap
+                        row = {
+                            "symbol": sym,
+                            "name": (lines[1] or "").strip(),
+                            "variation_pct": _parse_float(lines[2]),
+                            "volume": _parse_int(lines[3]),
+                            "value_fcfa": _parse_int(lines[4]),
+                            "cours_actuel": _parse_int(lines[5]),
+                            "cours_veille": _parse_int(lines[6]),
+                            "capitalisation": _parse_int(lines[7]),
+                        }
+                    if _row_plausible(row):
+                        out["stocks"].append(row)
                 except (ValueError, IndexError, TypeError):
                     pass
 

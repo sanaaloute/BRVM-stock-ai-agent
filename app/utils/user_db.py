@@ -151,9 +151,10 @@ def mark_help_sent(telegram_id: int) -> None:
         )
 
 
-# --- Portfolio ---
+# --- Portfolio (buy lots: one row per purchase; positions are aggregates) ----
 def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str, quantity: float = 1.0) -> dict[str, Any]:
-    """Add or update a position. Returns {ok, message, error}."""
+    """Record one buy lot. Re-adding the same symbol creates a SECOND lot (it
+    never overwrites the previous purchase). Returns {ok, message, error}."""
     get_or_create_user(telegram_id)
     symbol = (symbol or "").strip().upper()
     if symbol not in get_valid_symbols():
@@ -165,36 +166,29 @@ def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str
         return {"ok": False, "error": "Date d'achat invalide. Utilisez AAAA-MM-JJ."}
     if buy_price <= 0 or quantity <= 0:
         return {"ok": False, "error": "Le prix d'achat et la quantité doivent être positifs."}
-    t = models.Portfolio.__table__
-    stmt = _dialect_insert(t).values(
-        telegram_id=telegram_id,
-        symbol=symbol,
-        buy_price=buy_price,
-        buy_date=buy_date_str,
-        quantity=quantity,
-    )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["telegram_id", "symbol"],
-        set_={
-            "buy_price": stmt.excluded.buy_price,
-            "buy_date": stmt.excluded.buy_date,
-            "quantity": stmt.excluded.quantity,
-        },
-    )
     try:
         with db_engine.session_scope() as s:
-            s.execute(stmt)
-        return {"ok": True, "message": f"Ajout/mise à jour : {symbol} : {quantity} @ {buy_price} F CFA le {buy_date_str}."}
+            s.execute(
+                models.Portfolio.__table__.insert().values(
+                    telegram_id=telegram_id,
+                    symbol=symbol,
+                    buy_price=buy_price,
+                    buy_date=buy_date_str,
+                    quantity=quantity,
+                )
+            )
+        return {"ok": True, "message": f"Achat enregistré : {symbol} : {quantity} @ {buy_price} F CFA le {buy_date_str}."}
     except SQLAlchemyError as e:
         return {"ok": False, "error": str(e)}
 
 
 def portfolio_list(telegram_id: int) -> list[dict[str, Any]]:
-    """List portfolio rows for user."""
+    """All buy lots for the user (newest first), each with its lot id."""
     get_or_create_user(telegram_id)
     with db_engine.session_scope() as s:
         rows = s.execute(
             select(
+                models.Portfolio.id,
                 models.Portfolio.symbol,
                 models.Portfolio.buy_price,
                 models.Portfolio.buy_date,
@@ -202,13 +196,40 @@ def portfolio_list(telegram_id: int) -> list[dict[str, Any]]:
                 models.Portfolio.created_at,
             )
             .where(models.Portfolio.telegram_id == telegram_id)
-            .order_by(models.Portfolio.symbol)
+            .order_by(models.Portfolio.symbol, models.Portfolio.buy_date)
         ).mappings().all()
         return [dict(r) for r in rows]
 
 
+def portfolio_positions(telegram_id: int) -> list[dict[str, Any]]:
+    """Aggregate lots into positions: one entry per symbol with total quantity,
+    weighted average buy price, total cost and the individual lots."""
+    positions: dict[str, dict[str, Any]] = {}
+    for lot in portfolio_list(telegram_id):
+        pos = positions.setdefault(lot["symbol"], {
+            "symbol": lot["symbol"],
+            "quantity": 0.0,
+            "total_cost": 0.0,
+            "lots": [],
+        })
+        pos["quantity"] += lot["quantity"]
+        pos["total_cost"] += lot["buy_price"] * lot["quantity"]
+        pos["lots"].append(lot)
+    out = []
+    for pos in positions.values():
+        pos["avg_buy_price"] = round(pos["total_cost"] / pos["quantity"], 2) if pos["quantity"] else None
+        pos["total_cost"] = round(pos["total_cost"], 2)
+        out.append(pos)
+    return sorted(out, key=lambda p: p["symbol"])
+
+
+def portfolio_symbols(telegram_id: int) -> list[str]:
+    """Distinct symbols held (one entry per symbol regardless of lot count)."""
+    return [p["symbol"] for p in portfolio_positions(telegram_id)]
+
+
 def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
-    """Remove a symbol from portfolio."""
+    """Remove ALL lots of a symbol from the portfolio."""
     _ensure_ready()
     symbol = (symbol or "").strip().upper()
     with db_engine.session_scope() as s:
@@ -219,8 +240,53 @@ def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
             )
         )
         if res.rowcount:
-            return {"ok": True, "message": f"{symbol} retiré de votre portefeuille."}
+            return {"ok": True, "message": f"{res.rowcount} ligne(s) {symbol} retirée(s) de votre portefeuille."}
         return {"ok": False, "error": f"Aucune position {symbol} dans votre portefeuille."}
+
+
+def portfolio_lot_update(telegram_id: int, lot_id: int, *, buy_price: float | None = None, buy_date: str | None = None, quantity: float | None = None) -> dict[str, Any]:
+    """Edit one lot's price/date/quantity (mobile API)."""
+    _ensure_ready()
+    values: dict[str, Any] = {}
+    if buy_price is not None:
+        if buy_price <= 0:
+            return {"ok": False, "error": "Le prix d'achat doit être positif."}
+        values["buy_price"] = buy_price
+    if quantity is not None:
+        if quantity <= 0:
+            return {"ok": False, "error": "La quantité doit être positive."}
+        values["quantity"] = quantity
+    if buy_date is not None:
+        try:
+            values["buy_date"] = date.fromisoformat(buy_date.strip()[:10]).isoformat()
+        except ValueError:
+            return {"ok": False, "error": "Date d'achat invalide. Utilisez AAAA-MM-JJ."}
+    if not values:
+        return {"ok": False, "error": "Rien à modifier."}
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            update(models.Portfolio)
+            .where(models.Portfolio.id == lot_id, models.Portfolio.telegram_id == telegram_id)
+            .values(**values)
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Ligne d'achat mise à jour."}
+        return {"ok": False, "error": "Ligne d'achat introuvable."}
+
+
+def portfolio_lot_remove(telegram_id: int, lot_id: int) -> dict[str, Any]:
+    """Delete one lot (mobile API)."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.Portfolio).where(
+                models.Portfolio.id == lot_id,
+                models.Portfolio.telegram_id == telegram_id,
+            )
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Ligne d'achat supprimée."}
+        return {"ok": False, "error": "Ligne d'achat introuvable."}
 
 
 def _current_price(symbol: str) -> float | None:
@@ -241,36 +307,49 @@ def _current_price(symbol: str) -> float | None:
     return row["price"] if row else None
 
 
+def current_price(symbol: str) -> float | None:
+    """Public wrapper over _current_price (used by the mobile API)."""
+    return _current_price(symbol)
+
+
 def portfolio_with_prices(telegram_id: int) -> list[dict[str, Any]]:
-    """Portfolio rows with current_price and gain_loss_pct (when current price available)."""
-    rows = portfolio_list(telegram_id)
-    out = []
-    for r in rows:
-        sym = r["symbol"]
+    """Aggregated positions (one per symbol) with current price and gain/loss %.
+
+    Each row: symbol, quantity, avg_buy_price, total_cost, current_price,
+    gain_loss_pct, lots[]. `buy_price` mirrors avg_buy_price for backward
+    compatibility with existing consumers."""
+    rows = []
+    for pos in portfolio_positions(telegram_id):
+        sym = pos["symbol"]
+        avg = pos["avg_buy_price"]
         current = _current_price(sym)
-        buy = r["buy_price"]
         gain_pct = None
-        if current is not None and buy and buy > 0:
-            gain_pct = round((current - buy) / buy * 100, 2)
-        out.append({
-            **r,
+        if current is not None and avg:
+            gain_pct = round((current - avg) / avg * 100, 2)
+        rows.append({
+            "symbol": sym,
+            "quantity": pos["quantity"],
+            "avg_buy_price": avg,
+            "buy_price": avg,  # back-compat: weighted average price
+            "total_cost": pos["total_cost"],
             "current_price": current,
             "gain_loss_pct": gain_pct,
+            "lots": pos["lots"],
         })
-    return out
+    return rows
 
 
 def portfolio_summary(telegram_id: int) -> dict[str, Any]:
-    """Total cost, total value, overall gain/loss %."""
+    """Total cost, total value, overall gain/loss % over aggregated positions."""
     rows = portfolio_with_prices(telegram_id)
-    total_cost = sum(r["buy_price"] * r["quantity"] for r in rows)
+    total_cost = sum(r["total_cost"] for r in rows)
     total_value = 0.0
     for r in rows:
         p = r.get("current_price")
         if p is not None:
             total_value += p * r["quantity"]
         else:
-            total_value += r["buy_price"] * r["quantity"]  # fallback to cost
+            total_value += r["total_cost"]  # fallback to cost
     gain_pct = None
     if total_cost and total_value > 0:
         gain_pct = round((total_value - total_cost) / total_cost * 100, 2)
@@ -279,6 +358,7 @@ def portfolio_summary(telegram_id: int) -> dict[str, Any]:
         "total_value_fcfa": round(total_value, 2),
         "gain_loss_pct": gain_pct,
         "positions_count": len(rows),
+        "lots_count": sum(len(r["lots"]) for r in rows),
     }
 
 
@@ -357,6 +437,7 @@ def target_list(telegram_id: int) -> list[dict[str, Any]]:
     with db_engine.session_scope() as s:
         rows = s.execute(
             select(
+                models.TargetAlert.id,
                 models.TargetAlert.symbol,
                 models.TargetAlert.target_price,
                 models.TargetAlert.direction,
@@ -382,6 +463,21 @@ def target_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
         if res.rowcount:
             return {"ok": True, "message": f"Alerte de prix supprimée pour {symbol}."}
         return {"ok": False, "error": f"Aucune alerte définie pour {symbol}."}
+
+
+def target_remove_by_id(telegram_id: int, alert_id: int) -> dict[str, Any]:
+    """Remove one alert by id (mobile API); refuses alerts owned by others."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.TargetAlert).where(
+                models.TargetAlert.id == alert_id,
+                models.TargetAlert.telegram_id == telegram_id,
+            )
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Alerte supprimée."}
+        return {"ok": False, "error": "Alerte introuvable."}
 
 
 def get_pending_alerts() -> list[dict[str, Any]]:

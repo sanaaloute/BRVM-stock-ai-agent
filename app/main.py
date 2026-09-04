@@ -90,9 +90,11 @@ def _daily_timeseries_job() -> None:
 
 async def _check_target_alerts(context) -> None:
 
-    """Job: check price targets and send Telegram notifications to users whose target was reached."""
+    """Job: check price targets and notify users (Telegram and/or FCM push)."""
 
     try:
+
+        from app.services.notify import notify_user
 
         from app.utils.user_db import check_targets_and_notify
 
@@ -100,17 +102,17 @@ async def _check_target_alerts(context) -> None:
 
         results = await asyncio.to_thread(check_targets_and_notify)
 
-        for telegram_id, text in results:
+        for principal_id, text in results:
 
             try:
 
-                await context.bot.send_message(chat_id=telegram_id, text=text)
+                notify_user(principal_id, text, bot=context.bot, application=context.application, push_title="Kora Bourse — Alerte prix")
 
-                logger.info("Target alert sent to user %s", telegram_id)
+                logger.info("Target alert dispatched to user %s", principal_id)
 
             except Exception as e:
 
-                logger.warning("Failed to send target alert to %s: %s", telegram_id, e)
+                logger.warning("Failed to dispatch target alert to %s: %s", principal_id, e)
 
     except Exception as e:
 
@@ -126,9 +128,9 @@ async def _digest_job(context) -> None:
 
     try:
 
-        from app.bot.telegram_bot import split_text
-
         from app.services.digest import run_digest
+
+        from app.services.notify import notify_user
 
         # Blocking (scores every symbol from the local caches + DB): off the event loop.
 
@@ -140,19 +142,17 @@ async def _digest_job(context) -> None:
 
             pairs += await asyncio.to_thread(run_digest, "weekly")
 
-        for telegram_id, text in pairs:
+        for principal_id, text in pairs:
 
             try:
 
-                for chunk in split_text(text):
+                notify_user(principal_id, text, bot=context.bot, application=context.application, push_title="Kora Bourse — Digest")
 
-                    await context.bot.send_message(chat_id=telegram_id, text=chunk)
-
-                logger.info("Digest sent to user %s", telegram_id)
+                logger.info("Digest dispatched to user %s", principal_id)
 
             except Exception as e:
 
-                logger.warning("Failed to send digest to %s: %s", telegram_id, e)
+                logger.warning("Failed to dispatch digest to %s: %s", principal_id, e)
 
     except Exception as e:
 
@@ -321,4 +321,12 @@ app.include_router(chat_router)
 app.include_router(whatsapp_router)
 
 app.include_router(whatsapp_evolution_router)
+
+from app.api.mobile_auth import router as mobile_auth_router
+
+from app.api.mobile import router as mobile_router
+
+app.include_router(mobile_auth_router)
+
+app.include_router(mobile_router)
 

@@ -1,0 +1,300 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:brvm_mobile/core/api_client.dart';
+import 'package:brvm_mobile/core/auth_repository.dart';
+import 'package:brvm_mobile/core/models/auth_user.dart';
+import 'package:brvm_mobile/core/token_storage.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Adaptateur HTTP factice : répond via [handler] sans réseau.
+class MockAdapter implements HttpClientAdapter {
+  MockAdapter(this.handler);
+
+  final ResponseBody Function(RequestOptions options) handler;
+
+  final List<RequestOptions> requests = <RequestOptions>[];
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    requests.add(options);
+    return handler(options);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+ResponseBody jsonResponse(
+  Object? body,
+  int statusCode, {
+  Map<String, List<String>>? headers,
+}) =>
+    ResponseBody.fromString(
+      jsonEncode(body),
+      statusCode,
+      headers: headers ??
+          <String, List<String>>{
+            Headers.contentTypeHeader: <String>['application/json'],
+          },
+    );
+
+ApiClient buildClient(
+  MockAdapter adapter, {
+  TokenStorage? storage,
+  void Function()? onSessionExpired,
+}) {
+  final dio = Dio(BaseOptions(baseUrl: 'https://api.test'));
+  dio.httpClientAdapter = adapter;
+  return ApiClient(
+    storage ?? TokenStorage(MemoryKeyValueStore()),
+    dio: dio,
+    onSessionExpired: onSessionExpired,
+  );
+}
+
+Future<TokenStorage> storageWithSession() async {
+  final storage = TokenStorage(MemoryKeyValueStore());
+  await storage.saveSession(
+    const AuthSession(
+      user: AuthUser(id: 'u1', email: 'a@b.co', hasTelegram: false),
+      accessToken: 'expired-token',
+      accessExpiresIn: 0,
+      refreshToken: 'refresh-token',
+      refreshExpiresIn: 100,
+      tokenType: 'Bearer',
+    ),
+  );
+  return storage;
+}
+
+void main() {
+  group('AuthRepository.verifyCode', () {
+    test('parse la session complète en cas de succès', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'ok': true,
+          'user': <String, dynamic>{
+            'id': 'u42',
+            'email': 'trader@brvm.ci',
+            'phone': '+2250707070707',
+            'has_telegram': true,
+          },
+          'access_token': 'at-1',
+          'access_expires_in': 900,
+          'refresh_token': 'rt-1',
+          'refresh_expires_in': 1209600,
+          'token_type': 'Bearer',
+        }, 200),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final session = await repo.verifyCode('trader@brvm.ci', '123456');
+
+      expect(session.accessToken, 'at-1');
+      expect(session.refreshToken, 'rt-1');
+      expect(session.accessExpiresIn, 900);
+      expect(session.user.id, 'u42');
+      expect(session.user.hasTelegram, isTrue);
+      // La requête porte les bons paramètres.
+      final sent = adapter.requests.single.data as Map<String, dynamic>;
+      expect(sent['identifier'], 'trader@brvm.ci');
+      expect(sent['code'], '123456');
+    });
+
+    test('401 → AuthException avec message français', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, String>{'detail': 'nope'}, 401),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      expect(
+        () => repo.verifyCode('trader@brvm.ci', '000000'),
+        throwsA(isA<AuthException>()),
+      );
+      try {
+        await repo.verifyCode('trader@brvm.ci', '000000');
+      } on AuthException catch (e) {
+        expect(e.message, contains('Code incorrect'));
+      }
+    });
+  });
+
+  group('AuthRepository.requestCode', () {
+    test('429 avec detail structuré → retry_after_seconds extrait', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'detail': <String, dynamic>{
+            'message': 'Trop de tentatives',
+            'retry_after_seconds': 45,
+          },
+        }, 429),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final result = await repo.requestCode('trader@brvm.ci');
+
+      expect(result.ok, isFalse);
+      expect(result.retryAfterSeconds, 45);
+      expect(result.errorMessage, contains('Trop de tentatives'));
+    });
+
+    test('429 avec detail en chaîne', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'detail': 'Trop de demandes',
+        }, 429),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final result = await repo.requestCode('trader@brvm.ci');
+      expect(result.ok, isFalse);
+      expect(result.errorMessage, 'Trop de demandes');
+    });
+
+    test('400 → identifiant invalide', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'detail': 'Identifiant invalide',
+        }, 400),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final result = await repo.requestCode('???');
+      expect(result.ok, isFalse);
+      expect(result.invalidIdentifier, isTrue);
+    });
+
+    test('503 → authentification désactivée', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'detail': 'Authentification désactivée',
+        }, 503),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final result = await repo.requestCode('trader@brvm.ci');
+      expect(result.authDisabled, isTrue);
+    });
+
+    test('200 avec dev_code et canal phone', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'ok': true,
+          'channel': 'phone',
+          'dev_code': '111111',
+        }, 200),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      final result = await repo.requestCode('+2250707070707');
+      expect(result.ok, isTrue);
+      expect(result.channel, 'phone');
+      expect(result.devCode, '111111');
+    });
+  });
+
+  group('ApiClient — renouvellement du jeton (401 → refresh → retry)', () {
+    test('rejoue la requête après un refresh réussi et stocke les nouveaux jetons',
+        () async {
+      final storage = await storageWithSession();
+      var refreshCalls = 0;
+      final adapter = MockAdapter((options) {
+        if (options.path.contains('/auth/refresh')) {
+          refreshCalls++;
+          return jsonResponse(<String, dynamic>{
+            'user': <String, dynamic>{'id': 'u1', 'has_telegram': false},
+            'access_token': 'new-access',
+            'access_expires_in': 900,
+            'refresh_token': 'new-refresh',
+            'refresh_expires_in': 1209600,
+            'token_type': 'Bearer',
+          }, 200);
+        }
+        final auth = (options.headers['Authorization'] ?? '') as String;
+        if (auth == 'Bearer expired-token') {
+          return jsonResponse(<String, dynamic>{'detail': 'expired'}, 401);
+        }
+        if (auth == 'Bearer new-access') {
+          return jsonResponse(<String, dynamic>{'ok': true}, 200);
+        }
+        return jsonResponse(<String, dynamic>{'detail': 'unexpected'}, 500);
+      });
+      final client = buildClient(adapter, storage: storage);
+
+      final response = await client.get('/mobile/v1/portfolio');
+
+      expect(response.statusCode, 200);
+      expect(refreshCalls, 1);
+      expect(await storage.readAccessToken(), 'new-access');
+      expect(await storage.readRefreshToken(), 'new-refresh');
+      // 3 requêtes : originale (401), refresh, retry.
+      expect(adapter.requests.length, 3);
+      expect(adapter.requests.last.headers['Authorization'],
+          'Bearer new-access');
+    });
+
+    test('refresh en échec → jetons effacés et onSessionExpired appelé',
+        () async {
+      final storage = await storageWithSession();
+      var expiredCalled = false;
+      final adapter = MockAdapter((options) {
+        if (options.path.contains('/auth/refresh')) {
+          return jsonResponse(<String, dynamic>{'detail': 'invalid'}, 401);
+        }
+        return jsonResponse(<String, dynamic>{'detail': 'expired'}, 401);
+      });
+      final client = buildClient(
+        adapter,
+        storage: storage,
+        onSessionExpired: () => expiredCalled = true,
+      );
+
+      await expectLater(
+        client.get('/mobile/v1/portfolio'),
+        throwsA(isA<DioException>()),
+      );
+
+      expect(expiredCalled, isTrue);
+      expect(await storage.readAccessToken(), isNull);
+      expect(await storage.readRefreshToken(), isNull);
+    });
+
+    test('pas de refresh pour les routes auth', () async {
+      var refreshCalls = 0;
+      final adapter = MockAdapter((options) {
+        if (options.path.contains('/auth/refresh')) {
+          refreshCalls++;
+        }
+        return jsonResponse(<String, dynamic>{'detail': 'nope'}, 401);
+      });
+      final client = buildClient(adapter, storage: await storageWithSession());
+
+      await expectLater(
+        client.post('/mobile/v1/auth/verify-code',
+            data: <String, dynamic>{'identifier': 'a', 'code': '1'}),
+        throwsA(isA<DioException>()),
+      );
+      expect(refreshCalls, 0);
+      // Une seule requête : aucun retry déclenché.
+      expect(adapter.requests, hasLength(1));
+    });
+
+    test('attache le jeton d’accès aux requêtes authentifiées', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{'ok': true}, 200),
+      );
+      final client = buildClient(adapter, storage: await storageWithSession());
+
+      await client.get('/mobile/v1/quota');
+
+      expect(adapter.requests.single.headers['Authorization'],
+          'Bearer expired-token');
+    });
+  });
+}

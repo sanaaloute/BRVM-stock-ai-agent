@@ -123,10 +123,21 @@ def _pg_user_db_flow():
     assert r.get("ok"), r
     pos = user_db.portfolio_list(uid)
     assert len(pos) == 1 and pos[0]["symbol"] == "NTLC", pos
-    # upsert same symbol -> still one row, updated price
+    # adding the same symbol again creates a SECOND lot (avg price, not overwrite)
     user_db.portfolio_add(uid, "NTLC", 51000, "2025-02-01")
-    pos = user_db.portfolio_list(uid)
-    assert len(pos) == 1 and pos[0]["buy_price"] == 51000, pos
+    lots = user_db.portfolio_list(uid)
+    assert len(lots) == 2, lots
+    positions = user_db.portfolio_positions(uid)
+    assert len(positions) == 1, positions
+    agg = positions[0]
+    assert agg["quantity"] == 2, agg
+    assert agg["avg_buy_price"] == 50500, agg
+    assert len(agg["lots"]) == 2, agg
+    # lot-level edit + remove
+    lot_id = lots[0]["id"]
+    assert user_db.portfolio_lot_update(uid, lot_id, buy_price=52000).get("ok")
+    assert user_db.portfolio_lot_remove(uid, lot_id).get("ok")
+    assert len(user_db.portfolio_list(uid)) == 1
     assert user_db.tracking_add(uid, "SLBC").get("ok")
     assert [t["symbol"] for t in user_db.tracking_list(uid)] == ["SLBC"]
     assert user_db.target_add(uid, "NTLC", 60000, "above").get("ok")

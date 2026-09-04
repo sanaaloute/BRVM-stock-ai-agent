@@ -38,11 +38,18 @@ def fetch_sikafinance_actualites(limit: int = 20) -> dict[str, Any]:
             time.sleep(SLEEP)
         resp = http_get(ACTUALITES_URL, timeout=30, headers={"User-Agent": USER_AGENT})
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        html = resp.text
     except Exception as e:
-        logger.warning("Fetch failed for %s: %s", ACTUALITES_URL, e)
-        out["error"] = str(e)
-        return out
+        logger.warning("Direct fetch failed for %s: %s — trying browser render.", ACTUALITES_URL, e)
+        # The site blocks plain HTTP clients (403); fall back to a real browser.
+        from app.utils.browser_fetch import fetch_html_browser
+
+        html = fetch_html_browser(ACTUALITES_URL, wait_selector="a[href*='/marches/']")
+        if not html:
+            out["error"] = str(e)
+            return out
+
+    soup = BeautifulSoup(html, "html.parser")
 
     # Parse article links: [Title](url) followed by date (dd/mm/yyyy) and optional snippet
     seen_urls: set[str] = set()

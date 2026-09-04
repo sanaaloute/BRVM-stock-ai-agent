@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+
+  <defs>
+    <linearGradient id="goldring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F5D488"/>
+      <stop offset="0.5" stop-color="#D4A94E"/>
+      <stop offset="1" stop-color="#96702A"/>
+    </linearGradient>
+    <linearGradient id="green3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16E0A9"/>
+      <stop offset="1" stop-color="#0AA877"/>
+    </linearGradient>
+    <radialGradient id="coinbg" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#141E30"/>
+      <stop offset="1" stop-color="#070B12"/>
+    </radialGradient>
+  </defs>
+
+
+  <g transform="translate(512 512) scale(0.80) translate(-512 -512)">
+    <circle cx="512" cy="512" r="330" fill="none" stroke="url(#goldring)" stroke-width="58"/>
+    <circle cx="512" cy="512" r="330" fill="none" stroke="#FFE9B8" stroke-width="6" opacity="0.5" transform="rotate(-45 512 512)"/>
+    <line x1="400" y1="480" x2="400" y2="610" stroke="#0E8A66" stroke-width="14" stroke-linecap="round"/>
+    <rect x="366" y="510" width="68" height="90" rx="12" fill="url(#green3)"/>
+    <line x1="512" y1="420" x2="512" y2="600" stroke="#0E8A66" stroke-width="14" stroke-linecap="round"/>
+    <rect x="478" y="460" width="68" height="120" rx="12" fill="url(#green3)"/>
+    <line x1="624" y1="360" x2="624" y2="590" stroke="#A67A22" stroke-width="14" stroke-linecap="round"/>
+    <rect x="590" y="410" width="68" height="150" rx="12" fill="url(#goldring)"/>
+    <polyline points="340,600 450,540 560,480 690,400" fill="none" stroke="#00C896" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    <circle cx="690" cy="400" r="16" fill="#00C896"/>
+  </g>
+
+</svg>

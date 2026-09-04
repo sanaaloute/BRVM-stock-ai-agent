@@ -4,6 +4,10 @@
 
 Scrape and query BRVM (Bourse Régionale des Valeurs Mobilières) / West African stock data. A LangGraph agent (NLU → supervisor → 10 workers) coordinates scrapers (Sika Finance, Rich Bourse, BRVM) and analytics workers to answer natural-language questions via CLI, Telegram, or WhatsApp. Supports portfolio tracking, price alerts, predictions/trends, SGI (broker) info, company fiches and deterministic investment advice.
 
+## Mobile platform — Kora Bourse
+
+The same engine powers **Kora Bourse**, a Flutter mobile app (Android + iOS) for regional investors: AI advisor chat ("Kora") with persistent conversation history, live market palmares with search/filters, rich stock detail (price chart, fundamentals, dividends, news, technical prediction), portfolio buy-lots with weighted-average positions, price alerts, daily digest and SGI broker profiles — all over an authenticated REST API (`/mobile/v1/*`: OTP auth with JWT sessions, per-user quota, market snapshots served from the local DB with a scheduled post-close refresh). Source in [`mobile/`](mobile/README.md); app identity `com.neobytech.korabourse`. No Firebase dependency; push is pluggable via `PushService`.
+
 ## Project tree
 
 ```
@@ -37,9 +41,16 @@ RealTimeStock/
 │   ├── services/
 │   │   ├── chat_service.py  # Channel-agnostic entry to the AI pipeline
 │   │   ├── scoring.py       # Deterministic 0-100 scoring engine (advisor)
-│   │   └── digest.py        # Scheduled digest composition + job body
+│   │   ├── digest.py        # Scheduled digest composition + job body
+│   │   ├── market_data.py   # Daily post-close market snapshots + scheduled refresh
+│   │   ├── sgi_service.py   # SGI broker profiles (local DB list/detail)
+│   │   ├── auth_service.py  # Mobile OTP auth, JWT sessions, app-user identity
+│   │   ├── otp_delivery.py  # OTP via SMTP / SMS provider / mock
+│   │   ├── push.py          # FCM push (env-gated; disabled without credentials)
+│   │   └── notify.py        # Channel-agnostic user notification dispatch
 │   ├── tools/            # LangChain tools + pydantic schemas
 │   └── utils/            # Services (metrics, news, plots, cache, user_db, ...)
+├── mobile/               # Kora Bourse — Flutter app (Android + iOS), see mobile/README.md
 ├── config.py
 ├── main.py               # Single entry: API + Telegram bot
 ├── run_agent.py          # CLI agent

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="hexbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1420"/>
+      <stop offset="1" stop-color="#05080D"/>
+    </linearGradient>
+    <linearGradient id="hexstroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16E0A9"/>
+      <stop offset="1" stop-color="#0A6E52"/>
+    </linearGradient>
+    <linearGradient id="green5" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16E0A9"/>
+      <stop offset="1" stop-color="#0AA877"/>
+    </linearGradient>
+    <radialGradient id="glow5" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#00C896" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#00C896" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#hexbg)"/>
+  <path d="M512 148 L828 330 L828 694 L512 876 L196 694 L196 330 Z" fill="url(#glow5)" stroke="url(#hexstroke)" stroke-width="26" stroke-linejoin="round"/>
+  <g>
+    <line x1="386" y1="500" x2="386" y2="630" stroke="#0E8A66" stroke-width="14" stroke-linecap="round"/>
+    <rect x="352" y="540" width="68" height="80" rx="12" fill="url(#green5)"/>
+    <line x1="512" y1="430" x2="512" y2="640" stroke="#0E8A66" stroke-width="14" stroke-linecap="round"/>
+    <rect x="478" y="480" width="68" height="130" rx="12" fill="url(#green5)"/>
+    <line x1="638" y1="360" x2="638" y2="620" stroke="#A67A22" stroke-width="14" stroke-linecap="round"/>
+    <rect x="604" y="420" width="68" height="170" rx="12" fill="#D4A94E"/>
+  </g>
+  <polyline points="320,640 450,560 560,600 700,430" fill="none" stroke="#00C896" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+  <circle cx="700" cy="430" r="16" fill="#00C896"/>
+</svg>

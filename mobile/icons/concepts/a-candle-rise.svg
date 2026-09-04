@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101826"/>
+      <stop offset="1" stop-color="#070B12"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.28" r="0.75">
+      <stop offset="0" stop-color="#00C896" stop-opacity="0.28"/>
+      <stop offset="0.55" stop-color="#00C896" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#00C896" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16E0A9"/>
+      <stop offset="1" stop-color="#0AA877"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0C878"/>
+      <stop offset="1" stop-color="#C99430"/>
+    </linearGradient>
+    <radialGradient id="shadow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#000000" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#glow)"/>
+  <!-- faint grid -->
+  <g stroke="#223049" stroke-width="3" opacity="0.55">
+    <line x1="140" y1="330" x2="884" y2="330"/>
+    <line x1="140" y1="500" x2="884" y2="500"/>
+    <line x1="140" y1="670" x2="884" y2="670"/>
+  </g>
+  <!-- candles -->
+  <g>
+    <ellipse cx="268" cy="812" rx="120" ry="26" fill="url(#shadow)"/>
+    <ellipse cx="474" cy="812" rx="120" ry="26" fill="url(#shadow)"/>
+    <ellipse cx="700" cy="812" rx="130" ry="26" fill="url(#shadow)"/>
+    <!-- candle 1 -->
+    <line x1="268" y1="470" x2="268" y2="700" stroke="#0E8A66" stroke-width="16" stroke-linecap="round"/>
+    <rect x="216" y="530" width="104" height="150" rx="18" fill="url(#green)"/>
+    <!-- candle 2 -->
+    <line x1="474" y1="360" x2="474" y2="660" stroke="#0E8A66" stroke-width="16" stroke-linecap="round"/>
+    <rect x="422" y="430" width="104" height="200" rx="18" fill="url(#green)"/>
+    <!-- candle 3 (gold, tallest) -->
+    <line x1="700" y1="250" x2="700" y2="620" stroke="#A67A22" stroke-width="16" stroke-linecap="round"/>
+    <rect x="648" y="330" width="104" height="250" rx="18" fill="url(#gold)"/>
+  </g>
+  <!-- rising accent line -->
+  <polyline points="180,640 340,560 520,470 700,360 850,280" fill="none" stroke="#00C896" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  <circle cx="850" cy="280" r="22" fill="#00C896"/>
+  <circle cx="850" cy="280" r="40" fill="none" stroke="#00C896" stroke-width="6" opacity="0.45"/>
+</svg>

@@ -367,6 +367,54 @@ DIGEST_HOUR_GMT = int(os.getenv("DIGEST_HOUR_GMT", "18").strip() or "18")
 
 
 
+# --- Mobile app (Flutter) auth & notifications ---
+
+# JWT signing key for mobile user tokens (access/refresh). Empty = mobile auth
+# disabled (endpoints return 503). Generate: openssl rand -hex 32
+JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+
+JWT_ACCESS_TTL_SECONDS = int(os.getenv("JWT_ACCESS_TTL_SECONDS", "900").strip() or "900")
+
+JWT_REFRESH_TTL_SECONDS = int(os.getenv("JWT_REFRESH_TTL_SECONDS", str(30 * 24 * 3600)).strip() or str(30 * 24 * 3600))
+
+# OTP codes sent by email (SMTP) or SMS (provider). AUTH_PROVIDER=mock returns
+# the code in the API response (dev/tests only, NEVER in production).
+
+AUTH_PROVIDER = os.getenv("AUTH_PROVIDER", "smtp").strip().lower() or "smtp"
+
+OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "600").strip() or "600")
+
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5").strip() or "5")
+
+OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60").strip() or "60")
+
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587").strip() or "587")
+
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER).strip()
+
+# SMS provider for phone OTP: twilio | none. Account creds below.
+
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "").strip().lower()
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+
+# FCM push notifications (Android + iOS). Service-account JSON: either the
+# absolute path or the JSON document inline. Empty = push disabled.
+
+FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS", "").strip()
+
+
+
 # Sika Finance tab enrichment: the weekly company-details refresh also fetches
 
 # the COURS / ANALYSE / SECTEUR tabs (beta, technical signals, dividend history,

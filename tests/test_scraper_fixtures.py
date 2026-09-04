@@ -79,6 +79,32 @@ def test_richbourse_variation_table():
     assert cbibf["volume"] == 1181, cbibf
 
 
+def test_richbourse_variation_current_layout():
+    """Layout of 2026-09: 'Cours actuel'/'Cours de la veille' columns before
+    Volume, plus a 'Valeur %' column. Header-driven parsing must map values
+    correctly (regression: volume was shown as the price)."""
+    import app.scrapers.richbourse as rb
+
+    patch_get(rb, read_fixture("richbourse_variation_v2.html"))
+    out = rb.RichBourseScraper(period="veille", progression="tout", sleep_seconds=0).scrape()
+    stocks = out["stocks"]
+    assert len(stocks) >= 40, f"expected ~43 rows, got {len(stocks)}"
+
+    abjc = next((s for s in stocks if s["symbol"] == "ABJC"), None)
+    assert abjc is not None, "ABJC row missing"
+    # Anchors from the live page: cours 3 950, veille 3 790, volume 6 205.
+    assert abjc["cours_actuel"] == 3950, abjc
+    assert abjc["cours_veille"] == 3790, abjc
+    assert abjc["volume"] == 6205, abjc
+    assert abjc["variation_pct"] == 4.22, abjc
+    assert abjc["value_fcfa"] == 24178985, abjc
+    assert abjc["capitalisation"] == 43102400000, abjc
+    # Invariant: turnover ≈ price × volume for every full row.
+    for s in stocks:
+        if s.get("cours_actuel") and s.get("volume") and s.get("value_fcfa"):
+            assert 0.2 * s["cours_actuel"] * s["volume"] <= s["value_fcfa"] <= 5 * s["cours_actuel"] * s["volume"], s
+
+
 def test_richbourse_variation_garbage_html():
     import app.scrapers.richbourse as rb
 

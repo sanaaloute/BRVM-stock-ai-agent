@@ -132,7 +132,7 @@ def compose_digest(telegram_id: int, frequency: str) -> str | None:
     previous = {s["symbol"]: s for s in user_db.get_previous_snapshots(snap_day.isoformat())}
     current = {s["symbol"]: s for s in snapshots}
     try:
-        portfolio = user_db.portfolio_list(telegram_id)
+        portfolio = [{"symbol": sym} for sym in user_db.portfolio_symbols(telegram_id)]
         tracking = user_db.tracking_list(telegram_id)
     except Exception as e:
         logger.warning("Digest: could not load positions for %s: %s", telegram_id, e)

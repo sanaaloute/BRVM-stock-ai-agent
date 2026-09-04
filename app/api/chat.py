@@ -439,13 +439,15 @@ async def _memory_cleanup_loop() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    task = (
-        asyncio.create_task(_memory_cleanup_loop())
-        if config.MEMORY_TTL_HOURS > 0
-        else None
-    )
+    tasks = []
+    if config.MEMORY_TTL_HOURS > 0:
+        tasks.append(asyncio.create_task(_memory_cleanup_loop()))
+    # Daily post-close market snapshot (weekdays ~16:30 GMT).
+    from app.services.market_data import scheduled_refresh_loop
+
+    tasks.append(asyncio.create_task(scheduled_refresh_loop()))
     yield
-    if task is not None:
+    for task in tasks:
         task.cancel()
         try:
             await task
@@ -465,3 +467,10 @@ app.include_router(whatsapp_router)
 from app.channels.whatsapp import router as whatsapp_evolution_router  # noqa: E402
 
 app.include_router(whatsapp_evolution_router)
+
+# Mobile app (Flutter) API: JWT auth + market/portfolio/chat endpoints.
+from app.api.mobile_auth import router as mobile_auth_router  # noqa: E402
+from app.api.mobile import router as mobile_router  # noqa: E402
+
+app.include_router(mobile_auth_router)
+app.include_router(mobile_router)
