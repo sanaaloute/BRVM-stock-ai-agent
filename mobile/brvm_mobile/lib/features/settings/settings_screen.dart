@@ -217,7 +217,7 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Se déconnecter ?'),
-        content: const Text('Vous devrez recevoir un nouveau code pour vous reconnecter.'),
+        content: const Text('Vous devrez vous reconnecter avec votre e-mail/numéro et votre mot de passe.'),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),

@@ -337,7 +337,7 @@ OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "").strip() or None  # Op
 
 OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "").strip() or None  # Optional: X-OpenRouter-Title for rankings
 
-# Company details cache: entrypoint.sh re-runs run_company_details_fetch.py when
+# Company details cache: entrypoint.sh re-runs scripts/run_company_details_fetch.py when
 
 # any file in $DATA_DIR/company_details/ is missing or older than this many days.
 

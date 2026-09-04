@@ -2,11 +2,13 @@
 class AppConfig {
   /// URL de base de l'API backend.
   ///
-  /// Définie au build/run via :
-  /// `flutter run --dart-define=API_BASE_URL=https://api.example.com`
+  /// Par défaut : la passerelle de production (HTTPS via Cloudflare Tunnel :
+  /// kbourse.neobytech.net → API locale). Pour le développement/test sur un
+  /// réseau local :
+  /// `flutter run --dart-define=API_BASE_URL=http://192.168.x.x:8002`
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8000',
+    defaultValue: 'https://kbourse.neobytech.net',
   );
 
   static const String appName = 'Kora Bourse';

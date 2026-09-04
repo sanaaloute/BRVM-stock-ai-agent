@@ -122,6 +122,44 @@ class DevLoginBody(BaseModel):
     identifier: str | None = Field(default=None, max_length=120)
 
 
+class PasswordAuthBody(BaseModel):
+    identifier: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/register")
+def register(body: PasswordAuthBody, request: Request) -> dict[str, Any]:
+    """Local account creation: email or phone + password. No OTP/SMTP yet —
+    verification can be layered on later without changing this contract."""
+    _require_auth_enabled()
+    client = request.client.host if request.client else "unknown"
+    if _auth_throttled(f"{client}:{body.identifier}"):
+        raise HTTPException(status_code=429, detail="Trop de tentatives. Réessayez plus tard.")
+    user, error = auth_service.register_user(body.identifier, body.password)
+    if error == "exists":
+        raise HTTPException(status_code=409, detail="Un compte existe déjà pour cet e-mail/numéro. Connectez-vous.")
+    if error == "weak_password":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mot de passe trop court ({auth_service.PASSWORD_MIN_LENGTH} caractères minimum).",
+        )
+    if error == "invalid_identifier" or user is None:
+        raise HTTPException(status_code=400, detail="Format invalide. Utilisez un e-mail ou un numéro (+225...).")
+    return {"ok": True, "user": _public_user(user), **auth_service.issue_tokens(user)}
+
+
+@router.post("/login")
+def login(body: PasswordAuthBody, request: Request) -> dict[str, Any]:
+    _require_auth_enabled()
+    client = request.client.host if request.client else "unknown"
+    if _auth_throttled(f"{client}:{body.identifier}"):
+        raise HTTPException(status_code=429, detail="Trop de tentatives. Réessayez plus tard.")
+    user = auth_service.authenticate_user(body.identifier, body.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="E-mail/numéro ou mot de passe incorrect.")
+    return {"ok": True, "user": _public_user(user), **auth_service.issue_tokens(user)}
+
+
 @router.post("/dev-login")
 def dev_login(body: DevLoginBody | None = None) -> dict[str, Any]:
     """DEV ONLY: obtain a session without OTP. Enabled exclusively when

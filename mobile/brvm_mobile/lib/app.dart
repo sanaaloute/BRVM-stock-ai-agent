@@ -9,7 +9,6 @@ import 'core/push_service.dart';
 import 'core/theme_provider.dart';
 import 'features/alerts/alerts_screen.dart';
 import 'features/auth/identifier_screen.dart';
-import 'features/auth/otp_screen.dart';
 import 'features/chat/chat_screen.dart';
 import 'features/chat/conversations_screen.dart';
 import 'features/market/article_screen.dart';
@@ -164,10 +163,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/auth/identifier',
         builder: (context, state) => const IdentifierScreen(),
-      ),
-      GoRoute(
-        path: '/auth/otp',
-        builder: (context, state) => OtpScreen.fromState(state),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>

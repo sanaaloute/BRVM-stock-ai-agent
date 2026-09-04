@@ -2,7 +2,7 @@
 # + Evolution API (self-hosted WhatsApp gateway). The LLM runs on Ollama Cloud
 # (OLLAMA_CLOUD=true); no Ollama container is included.
 # (+ SGI broker data auto-bootstrapped into the shared volume by the image
-# entrypoint — no manual `python run_sgi_fetch.py` step; refreshed when older than
+# entrypoint — no manual `python -m scripts.run_sgi_fetch` step; refreshed when older than
 # 7 days, tunable via SGI_REFRESH_DAYS).
 #
 # Data lives in PostgreSQL (user data + chat checkpoints) when DATABASE_URL is set
@@ -38,7 +38,7 @@ services:
   api:
     build: .
     image: realtimestock-bot:latest
-    command: python run_api.py
+    command: python -m scripts.run_api
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm

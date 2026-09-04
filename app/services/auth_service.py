@@ -359,6 +359,92 @@ def authenticate_access_token(token: str) -> dict[str, Any] | None:
     return user
 
 
+# --- Password auth (scrypt, stdlib) -------------------------------------------
+
+PASSWORD_MIN_LENGTH = 8
+
+_SCRYPT_N = 2 ** 14
+
+
+def hash_password(password: str) -> str:
+    """scrypt salted hash, stored as 'salt$hash'."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.scrypt(
+        password.encode(), salt=salt.encode(), n=_SCRYPT_N, r=8, p=1
+    ).hex()
+    return f"{salt}${digest}"
+
+
+def verify_password(password: str, stored: str | None) -> bool:
+    if not stored or "$" not in stored:
+        return False
+    salt, digest = stored.split("$", 1)
+    try:
+        candidate = hashlib.scrypt(
+            password.encode(), salt=salt.encode(), n=_SCRYPT_N, r=8, p=1
+        ).hex()
+    except Exception:
+        return False
+    return hmac.compare_digest(candidate, digest)
+
+
+def set_user_password(user_id: uuid.UUID, password: str) -> None:
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        s.execute(
+            update(models.AppUser)
+            .where(models.AppUser.id == user_id)
+            .values(password_hash=hash_password(password))
+        )
+
+
+def find_user_by_identifier(identifier: str) -> dict[str, Any] | None:
+    """Look up an app user by email or phone (normalized)."""
+    classified = classify_identifier(identifier)
+    if not classified:
+        return None
+    channel, ident = classified
+    return _fetch_app_user(email=ident if channel == "email" else None,
+                           phone=ident if channel == "phone" else None)
+
+
+def register_user(identifier: str, password: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Create a local account (email or phone + password). Returns (user, None)
+    or (None, error_code) with 'exists' | 'invalid_identifier' | 'weak_password'."""
+    if len(password or "") < PASSWORD_MIN_LENGTH:
+        return None, "weak_password"
+    existing = find_user_by_identifier(identifier)
+    if existing is not None:
+        return None, "exists"
+    classified = classify_identifier(identifier)
+    if not classified:
+        return None, "invalid_identifier"
+    channel, ident = classified
+    user = get_or_create_app_user(email=ident if channel == "email" else None,
+                                  phone=ident if channel == "phone" else None)
+    if user is None:
+        return None, "invalid_identifier"
+    set_user_password(user["id"], password)
+    return user, None
+
+
+def authenticate_user(identifier: str, password: str) -> dict[str, Any] | None:
+    """Login: find the user, check the password (constant-time)."""
+    user = find_user_by_identifier(identifier)
+    if user is None:
+        # Burn comparable time against the scrypt cost to blunt user probing.
+        hashlib.scrypt(password.encode(), salt=b"0" * 32, n=_SCRYPT_N, r=8, p=1)
+        return None
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        stored = s.execute(
+            select(models.AppUser.password_hash).where(models.AppUser.id == user["id"])
+        ).scalar()
+    if not verify_password(password, stored):
+        return None
+    return user
+
+
 # --- Devices (FCM push tokens) -------------------------------------------------
 
 def register_device(user_id: uuid.UUID, fcm_token: str, platform: str) -> None:

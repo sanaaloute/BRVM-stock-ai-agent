@@ -53,15 +53,17 @@ RealTimeStock/
 ├── mobile/               # Kora Bourse — Flutter app (Android + iOS), see mobile/README.md
 ├── config.py
 ├── main.py               # Single entry: API + Telegram bot
-├── run_agent.py          # CLI agent
-├── run_api.py            # API only
-├── run_telegram_bot.py   # Bot only (requires API)
-├── run_scrapers.py
-├── run_sgi_fetch.py      # Refresh SGI list into app/data/sgi_brvm.json
-├── run_migrations.py     # Apply Alembic migrations (native; the Docker entrypoint runs it too)
-├── run_company_details_fetch.py  # Refresh Sika Finance company fiches (fundamentals cache)
+├── scripts/              # Entry-point scripts (run as `python -m scripts.<name>` from the repo root)
+│   ├── run_agent.py            # CLI agent
+│   ├── run_api.py              # API only
+│   ├── run_telegram_bot.py     # Bot only (requires API)
+│   ├── run_scrapers.py
+│   ├── run_sgi_fetch.py        # Refresh SGI list into app/data/sgi_brvm.json
+│   ├── run_migrations.py       # Apply Alembic migrations (native; the Docker entrypoint runs it too)
+│   ├── run_company_details_fetch.py  # Refresh Sika Finance company fiches (fundamentals cache)
+│   ├── dev-up.sh               # Dev quick-start (API + apps on emulators)
+│   └── backup.sh               # Production backups
 ├── tests/                # Offline test suites (see below)
-├── scripts/              # backup.sh — production backups (see "Production hardening")
 ├── requirements.txt
 ├── requirements-docker.txt
 ├── .env.example
@@ -101,8 +103,8 @@ RealTimeStock/
 3. **Run**
 
    ```bash
-   python run_scrapers.py              # scrape sites
-   python run_agent.py "Price of NTLC?" # CLI agent
+   python -m scripts.run_scrapers              # scrape sites
+   python -m scripts.run_agent "Price of NTLC?" # CLI agent
    ```
 
    **API + Telegram bot** (single process):
@@ -114,8 +116,8 @@ RealTimeStock/
    **Or run separately** (two terminals):
 
    ```bash
-   python run_api.py           # API only
-   python run_telegram_bot.py  # Bot (requires API)
+   python -m scripts.run_api           # API only
+   python -m scripts.run_telegram_bot  # Bot (requires API)
    ```
 
    Set `BRVM_API_URL` in `.env` if the API runs elsewhere (default `http://localhost:8000`).
@@ -166,8 +168,8 @@ RealTimeStock/
    - `API_SECRET_KEY` — **required for production**. The bot must send this shared secret as the `X-API-Key` header; the API rejects unauthenticated calls with 401. If empty, the API runs in dev mode (no auth). Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
    - `RATE_LIMIT_PER_MINUTE` (default `30`) — per-user request limit on `/chat` (0 disables).
    - `DAILY_FREE_QUOTA` (default `30`) — free requests per user per day; over-quota users get a friendly "come back tomorrow" reply. Failed requests are refunded; `QUOTA_EXEMPT_IDS` (comma-separated user ids) bypass the limit. Persisted in SQLite, so restarts don't reset it.
-   - **Persistence** (`DATABASE_URL`) — user data (portfolio, tracking, targets, quota, digest subscriptions, score snapshots) and chat checkpoints are backed by SQLAlchemy, with the schema managed by Alembic (`app/db/migrations/`). Empty = local SQLite files in `app/data/` — the zero-config dev default. Set `postgresql://user:password@host:5432/dbname` for PostgreSQL in production (docker compose wires this automatically via `POSTGRES_PASSWORD`). Migrations are applied automatically in Docker (the entrypoint runs them before boot; a schema failure blocks startup) or natively with `python run_migrations.py`.
-     **Local → cloud migration**: point `DATABASE_URL` at the cloud Postgres, run `python run_migrations.py` (creates/adopts the schema — the initial migration adopts legacy tables in place and never drops them), then restore a plain-SQL dump in the `scripts/backup.sh` format: `pg_dump -U <user> -d <db> > postgres.sql` on the source, `psql "$DATABASE_URL" -f postgres.sql` on the target. There is no SQLite → Postgres data migrator: dev data stays local, production starts fresh (users re-enter portfolios via the bot).
+   - **Persistence** (`DATABASE_URL`) — user data (portfolio, tracking, targets, quota, digest subscriptions, score snapshots) and chat checkpoints are backed by SQLAlchemy, with the schema managed by Alembic (`app/db/migrations/`). Empty = local SQLite files in `app/data/` — the zero-config dev default. Set `postgresql://user:password@host:5432/dbname` for PostgreSQL in production (docker compose wires this automatically via `POSTGRES_PASSWORD`). Migrations are applied automatically in Docker (the entrypoint runs them before boot; a schema failure blocks startup) or natively with `python -m scripts.run_migrations`.
+     **Local → cloud migration**: point `DATABASE_URL` at the cloud Postgres, run `python -m scripts.run_migrations` (creates/adopts the schema — the initial migration adopts legacy tables in place and never drops them), then restore a plain-SQL dump in the `scripts/backup.sh` format: `pg_dump -U <user> -d <db> > postgres.sql` on the source, `psql "$DATABASE_URL" -f postgres.sql` on the target. There is no SQLite → Postgres data migrator: dev data stays local, production starts fresh (users re-enter portfolios via the bot).
    - `RECURSION_LIMIT` (default `30`) — max agent steps before a partial answer is returned; a weak model looping on a failing tool otherwise burns paid LLM calls.
    - `LLM_REQUEST_TIMEOUT` (default `120` seconds) and `LLM_MAX_RETRIES` (default `1`) — per-request LLM timeout and client-level retry bounds, so a stalled or flaky provider can't pin an agent slot forever (the graph adds at most one more attempt on transient errors).
    - Chat memory: checkpoints live in `app/data/chat_memory.db`, condensed to the last user/answer pairs per thread (`MEMORY_MAX_MESSAGES`, default `20`). Conversations persist across turns so follow-up questions work; threads inactive for more than `MEMORY_TTL_HOURS` (default `24`, `0` = never) are wiped automatically (`MEMORY_CLEANUP_INTERVAL_SEC`, default `3600`). `/clearmemory` clears one user's thread on demand.
@@ -223,9 +225,9 @@ RealTimeStock/
    `docker compose exec db psql -U brvm -d brvm -c "CREATE DATABASE evolution;"`
 
    On startup each container auto-bootstraps the SGI (broker) list into the shared
-   `bot_data` volume (no manual `run_sgi_fetch.py` step) and refreshes it when older
+   `bot_data` volume (no manual `scripts.run_sgi_fetch` step) and refreshes it when older
    than `SGI_REFRESH_DAYS` (default 7). A manual refresh is one command away:
-   `docker compose exec api python run_sgi_fetch.py`.
+   `docker compose exec api python -m scripts.run_sgi_fetch`.
 
 ## Investment advice (advisor + digest)
 

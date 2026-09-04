@@ -115,6 +115,47 @@ def test_phone_identifier_gets_channel_phone():
     assert r.status_code == 200 and r.json()["channel"] == "phone"
 
 
+def test_password_register_and_login():
+    # register
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "pass-user@example.com", "password": "secret12345",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] and body["user"]["email"] == "pass-user@example.com"
+    assert body["access_token"] and body["refresh_token"]
+    # duplicate register → 409
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "pass-user@example.com", "password": "secret12345",
+    })
+    assert r.status_code == 409
+    # weak password → 400
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "weak@example.com", "password": "123",
+    })
+    assert r.status_code == 400
+    # wrong password → 401 (generic)
+    r = client.post("/mobile/v1/auth/login", json={
+        "identifier": "pass-user@example.com", "password": "wrong-password",
+    })
+    assert r.status_code == 401
+    # correct login → fresh tokens, same user id
+    r = client.post("/mobile/v1/auth/login", json={
+        "identifier": "pass-user@example.com", "password": "secret12345",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["id"] == body["user"]["id"]
+    # authenticated call works with the new token
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    assert client.get("/mobile/v1/quota", headers=h).status_code == 200
+    # phone identifier works too
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "+2250712345678", "password": "secret12345",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["phone"] == "+2250712345678"
+
+
 def test_dev_login_only_in_mock_mode():
     config.AUTH_PROVIDER = "mock"
     r = client.post("/mobile/v1/auth/dev-login", json={"identifier": "demo-device@example.com"})

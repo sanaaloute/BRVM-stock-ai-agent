@@ -55,6 +55,9 @@ class AppUser(Base):
     phone: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     # Real linked Telegram id (== principal_id when linked); NULL for app-only.
     telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, unique=True)
+    # Password auth (scrypt, "salt$hash"); NULL until the user sets one. OTP
+    # codes remain available as an alternative once delivery is configured.
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

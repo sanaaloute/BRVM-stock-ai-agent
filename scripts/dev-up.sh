@@ -12,10 +12,19 @@ PYTHON=.venv/bin/python
 export DATABASE_URL="" \
        JWT_SECRET=dev-mobile-secret-ChangeMe0123456789abcdef \
        AUTH_PROVIDER=mock \
-       API_PORT=$API_PORT
+       API_PORT=$API_PORT \
+       API_BIND=0.0.0.0
 # Tavily key comes from .env (needed for the news fallback chain).
 TAVILY=$(grep -s '^TAVILY_API_KEY=' .env | cut -d= -f2-)
 [[ -n "$TAVILY" ]] && export TAVILY_API_KEY="$TAVILY"
+
+# Cloudflare tunnel: expose the API on https://kbourse.neobytech.net
+if ! pgrep -f "cloudflared tunnel.*kora-api" > /dev/null; then
+  echo "Starting Cloudflare tunnel (kbourse.neobytech.net)"
+  nohup cloudflared tunnel --config "$HOME/.cloudflared/kora-api.yml" run kora-api >> /tmp/kora-tunnel.log 2>&1 &
+else
+  echo "Tunnel already running"
+fi
 
 if curl -s --max-time 2 "http://127.0.0.1:$API_PORT/health" | grep -q ok; then
   echo "API already running on :$API_PORT"
@@ -23,7 +32,7 @@ else
   echo "Starting API on :$API_PORT (log: /tmp/kora-api.log)"
   nohup env DATABASE_URL="" JWT_SECRET="$JWT_SECRET" AUTH_PROVIDER=mock \
         API_PORT=$API_PORT ${TAVILY_API_KEY:+TAVILY_API_KEY=$TAVILY_API_KEY} \
-        "$PYTHON" run_api.py > /tmp/kora-api.log 2>&1 &
+        "$PYTHON" -m scripts.run_api > /tmp/kora-api.log 2>&1 &
   for _ in $(seq 1 20); do
     curl -s --max-time 1 "http://127.0.0.1:$API_PORT/health" | grep -q ok && break
     sleep 1

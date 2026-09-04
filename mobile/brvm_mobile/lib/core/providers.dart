@@ -85,24 +85,39 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<RequestCodeResult> requestCode(String identifier) =>
-      _ref.read(authRepositoryProvider).requestCode(identifier);
-
-  Future<VerifyCodeResult> verifyCode(String identifier, String code) async {
+  /// Connecte l'utilisateur. Retourne `null` si OK, sinon le message
+  /// d'erreur à afficher.
+  Future<String?> login(String identifier, String password) async {
     try {
       final session =
-          await _ref.read(authRepositoryProvider).verifyCode(identifier, code);
+          await _ref.read(authRepositoryProvider).login(identifier, password);
       await _ref.read(storageProvider).saveSession(session);
       state = AuthAuthenticated(session.user);
       unawaited(_registerDevice());
-      return VerifyCodeResult.success(session);
+      return null;
     } on AuthException catch (e) {
-      return VerifyCodeResult.failure(e.message);
+      return e.message;
     }
   }
 
-  /// Mode démo : session sans OTP. Fonctionne seulement quand le backend
-  /// tourne avec AUTH_PROVIDER=mock (403/503 sinon → message d'erreur).
+  /// Crée un compte puis ouvre la session (même flux que [login]).
+  /// Retourne `null` si OK, sinon le message d'erreur à afficher.
+  Future<String?> register(String identifier, String password) async {
+    try {
+      final session = await _ref
+          .read(authRepositoryProvider)
+          .register(identifier, password);
+      await _ref.read(storageProvider).saveSession(session);
+      state = AuthAuthenticated(session.user);
+      unawaited(_registerDevice());
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    }
+  }
+
+  /// Mode démo : session sans mot de passe. Fonctionne seulement quand le
+  /// backend tourne avec AUTH_PROVIDER=mock (403/503 sinon → message d'erreur).
   Future<String?> devLogin({String? identifier}) async {
     try {
       final session = await _ref

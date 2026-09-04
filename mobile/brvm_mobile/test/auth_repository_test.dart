@@ -74,8 +74,8 @@ Future<TokenStorage> storageWithSession() async {
 }
 
 void main() {
-  group('AuthRepository.verifyCode', () {
-    test('parse la session complète en cas de succès', () async {
+  group('AuthRepository.login', () {
+    test('succès → session parsée, bonne route et corps de requête', () async {
       final adapter = MockAdapter(
         (options) => jsonResponse(<String, dynamic>{
           'ok': true,
@@ -94,108 +94,110 @@ void main() {
       );
       final repo = AuthRepository(buildClient(adapter));
 
-      final session = await repo.verifyCode('trader@brvm.ci', '123456');
+      final session = await repo.login('trader@brvm.ci', 'motdepasse');
 
       expect(session.accessToken, 'at-1');
       expect(session.refreshToken, 'rt-1');
       expect(session.accessExpiresIn, 900);
       expect(session.user.id, 'u42');
       expect(session.user.hasTelegram, isTrue);
-      // La requête porte les bons paramètres.
-      final sent = adapter.requests.single.data as Map<String, dynamic>;
+      final request = adapter.requests.single;
+      expect(request.path, '/mobile/v1/auth/login');
+      final sent = request.data as Map<String, dynamic>;
       expect(sent['identifier'], 'trader@brvm.ci');
-      expect(sent['code'], '123456');
+      expect(sent['password'], 'motdepasse');
     });
 
-    test('401 → AuthException avec message français', () async {
+    test('401 → message identifiants incorrects', () async {
       final adapter = MockAdapter(
         (options) => jsonResponse(<String, String>{'detail': 'nope'}, 401),
       );
       final repo = AuthRepository(buildClient(adapter));
 
-      expect(
-        () => repo.verifyCode('trader@brvm.ci', '000000'),
+      await expectLater(
+        repo.login('trader@brvm.ci', 'mauvais'),
         throwsA(isA<AuthException>()),
       );
       try {
-        await repo.verifyCode('trader@brvm.ci', '000000');
+        await repo.login('trader@brvm.ci', 'mauvais');
       } on AuthException catch (e) {
-        expect(e.message, contains('Code incorrect'));
+        expect(e.message, 'E-mail/numéro ou mot de passe incorrect.');
+      }
+    });
+
+    test('429 → message du detail (throttled)', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{
+          'detail': 'Trop de tentatives, réessayez dans une minute',
+        }, 429),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      try {
+        await repo.login('trader@brvm.ci', 'motdepasse');
+        fail('devrait lever AuthException');
+      } on AuthException catch (e) {
+        expect(e.message, contains('Trop de tentatives'));
       }
     });
   });
 
-  group('AuthRepository.requestCode', () {
-    test('429 avec detail structuré → retry_after_seconds extrait', () async {
-      final adapter = MockAdapter(
-        (options) => jsonResponse(<String, dynamic>{
-          'detail': <String, dynamic>{
-            'message': 'Trop de tentatives',
-            'retry_after_seconds': 45,
-          },
-        }, 429),
-      );
-      final repo = AuthRepository(buildClient(adapter));
-
-      final result = await repo.requestCode('trader@brvm.ci');
-
-      expect(result.ok, isFalse);
-      expect(result.retryAfterSeconds, 45);
-      expect(result.errorMessage, contains('Trop de tentatives'));
-    });
-
-    test('429 avec detail en chaîne', () async {
-      final adapter = MockAdapter(
-        (options) => jsonResponse(<String, dynamic>{
-          'detail': 'Trop de demandes',
-        }, 429),
-      );
-      final repo = AuthRepository(buildClient(adapter));
-
-      final result = await repo.requestCode('trader@brvm.ci');
-      expect(result.ok, isFalse);
-      expect(result.errorMessage, 'Trop de demandes');
-    });
-
-    test('400 → identifiant invalide', () async {
-      final adapter = MockAdapter(
-        (options) => jsonResponse(<String, dynamic>{
-          'detail': 'Identifiant invalide',
-        }, 400),
-      );
-      final repo = AuthRepository(buildClient(adapter));
-
-      final result = await repo.requestCode('???');
-      expect(result.ok, isFalse);
-      expect(result.invalidIdentifier, isTrue);
-    });
-
-    test('503 → authentification désactivée', () async {
-      final adapter = MockAdapter(
-        (options) => jsonResponse(<String, dynamic>{
-          'detail': 'Authentification désactivée',
-        }, 503),
-      );
-      final repo = AuthRepository(buildClient(adapter));
-
-      final result = await repo.requestCode('trader@brvm.ci');
-      expect(result.authDisabled, isTrue);
-    });
-
-    test('200 avec dev_code et canal phone', () async {
+  group('AuthRepository.register', () {
+    test('succès → session parsée', () async {
       final adapter = MockAdapter(
         (options) => jsonResponse(<String, dynamic>{
           'ok': true,
-          'channel': 'phone',
-          'dev_code': '111111',
+          'user': <String, dynamic>{
+            'id': 'u7',
+            'email': 'nouveau@brvm.ci',
+            'has_telegram': false,
+          },
+          'access_token': 'at-2',
+          'access_expires_in': 900,
+          'refresh_token': 'rt-2',
+          'refresh_expires_in': 1209600,
+          'token_type': 'Bearer',
         }, 200),
       );
       final repo = AuthRepository(buildClient(adapter));
 
-      final result = await repo.requestCode('+2250707070707');
-      expect(result.ok, isTrue);
-      expect(result.channel, 'phone');
-      expect(result.devCode, '111111');
+      final session = await repo.register('nouveau@brvm.ci', 'motdepasse');
+
+      expect(session.accessToken, 'at-2');
+      expect(session.user.id, 'u7');
+      expect(adapter.requests.single.path, '/mobile/v1/auth/register');
+    });
+
+    test('409 → compte déjà existant', () async {
+      final adapter = MockAdapter(
+        (options) =>
+            jsonResponse(<String, String>{'detail': 'Account exists'}, 409),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      try {
+        await repo.register('trader@brvm.ci', 'motdepasse');
+        fail('devrait lever AuthException');
+      } on AuthException catch (e) {
+        expect(e.message, contains('existe déjà'));
+        expect(e.message, contains('Connectez-vous'));
+      }
+    });
+
+    test('400 → detail transmis tel quel (mot de passe faible)', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, String>{
+          'detail': 'Mot de passe : 8 caractères minimum.',
+        }, 400),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      try {
+        await repo.register('trader@brvm.ci', '123');
+        fail('devrait lever AuthException');
+      } on AuthException catch (e) {
+        expect(e.message, 'Mot de passe : 8 caractères minimum.');
+      }
     });
   });
 
@@ -276,8 +278,8 @@ void main() {
       final client = buildClient(adapter, storage: await storageWithSession());
 
       await expectLater(
-        client.post('/mobile/v1/auth/verify-code',
-            data: <String, dynamic>{'identifier': 'a', 'code': '1'}),
+        client.post('/mobile/v1/auth/login',
+            data: <String, dynamic>{'identifier': 'a', 'password': 'b'}),
         throwsA(isA<DioException>()),
       );
       expect(refreshCalls, 0);

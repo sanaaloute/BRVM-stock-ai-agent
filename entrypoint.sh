@@ -2,7 +2,7 @@
 # Container entrypoint: best-effort SGI (broker) data bootstrap, then run the real command.
 #
 # Populates app/data/sgi_brvm.json when missing or older than SGI_REFRESH_DAYS
-# (default 7), so no manual `python run_sgi_fetch.py` step is needed after deploy.
+# (default 7), so no manual `python -m scripts.run_sgi_fetch` step is needed after deploy.
 # Never blocks startup: if the fetch fails, SGI answers degrade gracefully.
 set -e
 
@@ -16,9 +16,9 @@ mkdir -p "$DATA_DIR"
 # Unlike the data fetches below, a schema failure MUST block startup.
 echo "[entrypoint] Running database migrations..."
 if command -v flock >/dev/null 2>&1; then
-  flock "$DATA_DIR/.migrate.lock" python run_migrations.py || exit 1
+  flock "$DATA_DIR/.migrate.lock" python -m scripts.run_migrations || exit 1
 else
-  python run_migrations.py || exit 1
+  python -m scripts.run_migrations || exit 1
 fi
 
 # Data bootstraps run in the BACKGROUND: on first boot they fetch dozens of
@@ -37,10 +37,10 @@ fi
     echo "[entrypoint] SGI data missing or older than ${DAYS}d - fetching (best effort, background)..."
     # flock: api + bot share the data volume and may boot together on first deploy.
     if command -v flock >/dev/null 2>&1; then
-      flock "$DATA_DIR/.sgi.lock" python run_sgi_fetch.py \
+      flock "$DATA_DIR/.sgi.lock" python -m scripts.run_sgi_fetch \
         || echo "[entrypoint] WARNING: SGI fetch failed (non-fatal); SGI answers may be limited."
     else
-      python run_sgi_fetch.py \
+      python -m scripts.run_sgi_fetch \
         || echo "[entrypoint] WARNING: SGI fetch failed (non-fatal); SGI answers may be limited."
     fi
   fi
@@ -61,10 +61,10 @@ fi
   if [ "$cd_stale" = "1" ]; then
     echo "[entrypoint] company_details missing or older than ${CD_DAYS}d - fetching (best effort, background)..."
     if command -v flock >/dev/null 2>&1; then
-      flock "$DATA_DIR/.company_details.lock" python run_company_details_fetch.py \
+      flock "$DATA_DIR/.company_details.lock" python -m scripts.run_company_details_fetch \
         || echo "[entrypoint] WARNING: company details fetch failed (non-fatal)."
     else
-      python run_company_details_fetch.py \
+      python -m scripts.run_company_details_fetch \
         || echo "[entrypoint] WARNING: company details fetch failed (non-fatal)."
     fi
   fi

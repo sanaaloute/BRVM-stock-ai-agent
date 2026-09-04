@@ -11,8 +11,7 @@ RUN pip install --upgrade pip \
 
 # App and data
 COPY config.py .
-COPY run_agent.py run_api.py run_telegram_bot.py run_scrapers.py run_sgi_fetch.py ./
-COPY run_migrations.py run_company_details_fetch.py ./
+COPY scripts ./scripts
 COPY alembic.ini ./
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
@@ -57,5 +56,5 @@ USER bot
 # Entrypoint bootstraps SGI (broker) data into the shared volume on startup.
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Default: run Telegram bot. Override to run CLI agent: python run_agent.py "query"
-CMD ["python", "run_telegram_bot.py"]
+# Default: run Telegram bot. Override to run CLI agent: python -m scripts.run_agent "query"
+CMD ["python", "-m", "scripts.run_telegram_bot"]

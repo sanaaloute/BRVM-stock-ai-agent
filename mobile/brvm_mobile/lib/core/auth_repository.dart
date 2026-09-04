@@ -5,120 +5,75 @@ import 'config.dart';
 import 'json_utils.dart';
 import 'models/auth_user.dart';
 
-/// Résultat de POST /mobile/v1/auth/request-code.
-class RequestCodeResult {
-  const RequestCodeResult._({
-    required this.ok,
-    this.channel = '',
-    this.devCode,
-    this.errorMessage,
-    this.retryAfterSeconds,
-    this.invalidIdentifier = false,
-    this.authDisabled = false,
-  });
-
-  factory RequestCodeResult.success({
-    required String channel,
-    String? devCode,
-  }) =>
-      RequestCodeResult._(ok: true, channel: channel, devCode: devCode);
-
-  factory RequestCodeResult.failure({
-    String? message,
-    int? retryAfterSeconds,
-    bool invalidIdentifier = false,
-    bool authDisabled = false,
-  }) =>
-      RequestCodeResult._(
-        ok: false,
-        errorMessage: message,
-        retryAfterSeconds: retryAfterSeconds,
-        invalidIdentifier: invalidIdentifier,
-        authDisabled: authDisabled,
-      );
-
-  final bool ok;
-  final String channel;
-  final String? devCode;
-  final String? errorMessage;
-  final int? retryAfterSeconds;
-  final bool invalidIdentifier;
-  final bool authDisabled;
-}
-
-/// Résultat de POST /mobile/v1/auth/verify-code.
-class VerifyCodeResult {
-  const VerifyCodeResult._({this.session, this.errorMessage});
-
-  factory VerifyCodeResult.success(AuthSession session) =>
-      VerifyCodeResult._(session: session);
-
-  factory VerifyCodeResult.failure(String message) =>
-      VerifyCodeResult._(errorMessage: message);
-
-  final AuthSession? session;
-  final String? errorMessage;
-
-  bool get isSuccess => session != null;
-}
-
-/// Encapsule les appels d'authentification de l'API.
+/// Encapsule les appels d'authentification de l'API
+/// (identifiant + mot de passe ; plus de code OTP).
 class AuthRepository {
   AuthRepository(this._api);
 
   final ApiClient _api;
 
-  Future<RequestCodeResult> requestCode(String identifier) async {
+  /// Connexion. 401 → identifiants incorrects ; 429 → limité.
+  Future<AuthSession> login(String identifier, String password) async {
     try {
       final response = await _api.post(
-        '${AppConfig.apiPrefix}/auth/request-code',
-        data: <String, dynamic>{'identifier': identifier},
+        '${AppConfig.apiPrefix}/auth/login',
+        data: <String, dynamic>{
+          'identifier': identifier,
+          'password': password,
+        },
       );
-      final data = asMap(response.data);
-      return RequestCodeResult.success(
-        channel: asString(data['channel']) ?? 'email',
-        devCode: asString(data['dev_code']),
-      );
+      return AuthSession.fromJson(asMap(response.data));
     } on DioException catch (e) {
-      final status = e.response?.statusCode;
-      final (message, retryAfter) = _parseDetail(e.response?.data);
-      switch (status) {
+      final (message, _) = _parseDetail(e.response?.data);
+      switch (e.response?.statusCode) {
+        case 401:
+          throw const AuthException(
+            'E-mail/numéro ou mot de passe incorrect.',
+          );
         case 429:
-          return RequestCodeResult.failure(
-            message: message ?? 'Trop de tentatives. Veuillez réessayer plus tard.',
-            retryAfterSeconds: retryAfter,
-          );
-        case 400:
-          return RequestCodeResult.failure(
-            message: message ?? 'Identifiant invalide.',
-            invalidIdentifier: true,
-          );
-        case 503:
-          return RequestCodeResult.failure(
-            message: message ?? 'L’authentification est temporairement désactivée.',
-            authDisabled: true,
+          throw AuthException(
+            message ?? 'Trop de tentatives. Veuillez réessayer plus tard.',
           );
         default:
-          return RequestCodeResult.failure(
-            message: message ?? 'Erreur réseau. Vérifiez votre connexion.',
+          throw AuthException(
+            message ?? 'Erreur réseau. Vérifiez votre connexion.',
           );
       }
     }
   }
 
-  Future<AuthSession> verifyCode(String identifier, String code) async {
+  /// Création de compte. 400 → détail tel quel (ex. mot de passe faible) ;
+  /// 409 → compte déjà existant.
+  Future<AuthSession> register(String identifier, String password) async {
     try {
       final response = await _api.post(
-        '${AppConfig.apiPrefix}/auth/verify-code',
-        data: <String, dynamic>{'identifier': identifier, 'code': code},
+        '${AppConfig.apiPrefix}/auth/register',
+        data: <String, dynamic>{
+          'identifier': identifier,
+          'password': password,
+        },
       );
       return AuthSession.fromJson(asMap(response.data));
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
-        throw const AuthException('Code incorrect ou expiré.');
-      }
       final (message, _) = _parseDetail(e.response?.data);
-      throw AuthException(message ?? 'Erreur réseau. Vérifiez votre connexion.');
+      switch (e.response?.statusCode) {
+        case 400:
+          throw AuthException(
+            message ?? 'Identifiant ou mot de passe invalide.',
+          );
+        case 409:
+          throw const AuthException(
+            'Un compte existe déjà pour cet identifiant. Connectez-vous.',
+          );
+        case 429:
+          throw AuthException(
+            message ?? 'Trop de tentatives. Veuillez réessayer plus tard.',
+          );
+        default:
+          throw AuthException(
+            message ?? 'Erreur réseau. Vérifiez votre connexion.',
+          );
+      }
     }
   }
 
@@ -140,12 +95,6 @@ class AuthRepository {
     }
   }
 
-  /// Profil frais de l'utilisateur authentifié (GET /mobile/v1/me).
-  Future<AuthUser> me() async {
-    final response = await _api.get('${AppConfig.apiPrefix}/me');
-    return AuthUser.fromJson(asMap(response.data));
-  }
-
   /// Déconnexion côté serveur (révoque le refresh token).
   /// Les erreurs sont ignorées : le nettoyage local reste effectué.
   Future<void> logout(String refreshToken) async {
@@ -159,8 +108,14 @@ class AuthRepository {
     }
   }
 
-  /// Mode démo : session sans OTP. N'existe que quand le backend tourne avec
-  /// AUTH_PROVIDER=mock (sinon 403/503 → [AuthException]).
+  /// Profil frais de l'utilisateur authentifié (GET /mobile/v1/me).
+  Future<AuthUser> me() async {
+    final response = await _api.get('${AppConfig.apiPrefix}/me');
+    return AuthUser.fromJson(asMap(response.data));
+  }
+
+  /// Mode démo : session sans compte. N'existe que quand le backend tourne
+  /// avec AUTH_PROVIDER=mock (sinon 403/503 → [AuthException]).
   Future<AuthSession> devLogin({String? identifier}) async {
     try {
       final response = await _api.post(

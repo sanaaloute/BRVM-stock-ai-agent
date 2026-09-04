@@ -22,18 +22,18 @@ Toute l'interface est en **français**.
 ## Prérequis
 
 - Flutter 3.35+ / Dart 3.12+ (`flutter --version`).
-- Le backend doit tourner (par défaut sur `http://localhost:8000`).
+- En production, l'application parle à la passerelle `https://api.korabourse.com` (défaut, aucune configuration).
+- En développement/test : lancer le backend localement puis pointer l'app dessus.
 
 ## Configuration
 
-L'URL de l'API se configure par `--dart-define` :
+L'URL de l'API se configure par `--dart-define` (écrase la passerelle de production) :
 
 ```bash
-flutter run --dart-define=API_BASE_URL=https://api.example.com
+flutter run --dart-define=API_BASE_URL=http://192.168.x.x:8002   # API locale (LAN)
 ```
 
-Sans `--dart-define`, l'API par défaut est `http://localhost:8000`
-(penser à adapter pour un émulateur : `http://10.0.2.2:8000` sous Android).
+Pour un émulateur Android, l'API du poste est joignable via `http://10.0.2.2:8002`.
 
 ## Lancer l'application
 
