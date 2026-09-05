@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">
+  <defs>
+    <linearGradient id="fbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1420"/>
+      <stop offset="1" stop-color="#05080D"/>
+    </linearGradient>
+    <radialGradient id="fglow" cx="0.78" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#00C896" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#00C896" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fgold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F5D488"/>
+      <stop offset="0.5" stop-color="#D4A94E"/>
+      <stop offset="1" stop-color="#96702A"/>
+    </linearGradient>
+    <linearGradient id="fgreen2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16E0A9"/>
+      <stop offset="1" stop-color="#0AA877"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="500" fill="url(#fbg)"/>
+  <rect x="0" y="0" width="1024" height="500" fill="url(#fglow)"/>
+  <!-- candlestick motif, right side -->
+  <g opacity="0.9">
+    <line x1="790" y1="230" x2="790" y2="330" stroke="#0E8A66" stroke-width="8" stroke-linecap="round"/>
+    <rect x="768" y="255" width="44" height="60" rx="9" fill="url(#fgreen2)"/>
+    <line x1="862" y1="180" x2="862" y2="320" stroke="#A67A22" stroke-width="8" stroke-linecap="round"/>
+    <rect x="840" y="215" width="44" height="80" rx="9" fill="url(#fgold)"/>
+    <polyline points="726,330 800,290 850,305 918,225" fill="none" stroke="#00C896" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="918" cy="225" r="10" fill="#00C896"/>
+  </g>
+  <!-- coin ring echo -->
+  <circle cx="826" cy="272" r="150" fill="none" stroke="url(#fgold)" stroke-width="3" opacity="0.35"/>
+  <!-- text -->
+  <g font-family="Helvetica, Arial, sans-serif">
+    <text x="72" y="232" font-size="76" font-weight="bold" fill="#F2F6F4">Kora Bourse</text>
+    <text x="74" y="286" font-size="27" fill="#9BA7B8">Kora, votre agent boursier IA pour la</text>
+    <text x="74" y="322" font-size="27" fill="#9BA7B8">bourse régionale d&#8217;Afrique de l&#8217;Ouest.</text>
+    <text x="74" y="392" font-size="22" fill="#00C896" font-weight="bold">Cotations &#183; Analyses &#183; Portefeuille &#183; Alertes</text>
+  </g>
+</svg>
