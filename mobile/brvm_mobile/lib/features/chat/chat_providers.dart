@@ -11,7 +11,11 @@ final chatRepositoryProvider = Provider<ChatRepository>(
 );
 
 final conversationsProvider = FutureProvider.autoDispose<List<Conversation>>(
-  (ref) => ref.watch(chatRepositoryProvider).getConversations(),
+  (ref) {
+    // Changement de compte → rechargement automatique (pas de cache croisé).
+    ref.watch(currentUserIdProvider);
+    return ref.watch(chatRepositoryProvider).getConversations();
+  },
 );
 
 /// Nouvel identifiant de conversation. Préfixé `app:{userId}` : le backend
@@ -21,14 +25,6 @@ String buildThreadId(String userId) {
   final rand = Random.secure().nextInt(0x7fffffff).toRadixString(16);
   return 'app:$userId:$time-$rand';
 }
-
-/// Identifiant de l'utilisateur connecté, `null` tant que l'auth n'est pas
-/// résolue. Lu au moment de l'envoi pour construire l'id de conversation
-/// (jamais « anonyme » : un thread orphelin disparaîtrait de la liste).
-final currentUserIdProvider = Provider<String?>((ref) {
-  final auth = ref.watch(authStateProvider);
-  return auth is AuthAuthenticated ? auth.user.id : null;
-});
 
 /// État d'une conversation de chat.
 class ChatState {

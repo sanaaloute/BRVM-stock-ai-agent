@@ -69,8 +69,11 @@ final watchlistProvider =
 
 class WatchlistNotifier extends AsyncNotifier<List<WatchlistEntry>> {
   @override
-  Future<List<WatchlistEntry>> build() =>
-      ref.watch(watchlistRepositoryProvider).get();
+  Future<List<WatchlistEntry>> build() {
+    // Changement de compte → rechargement automatique (pas de cache croisé).
+    ref.watch(currentUserIdProvider);
+    return ref.watch(watchlistRepositoryProvider).get();
+  }
 
   /// Ajoute un symbole. Retourne `null` si OK, sinon le message d'erreur.
   Future<String?> add(String symbol) async {

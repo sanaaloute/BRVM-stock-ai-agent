@@ -85,8 +85,11 @@ final portfolioProvider =
 
 class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
   @override
-  Future<PortfolioData> build() =>
-      ref.watch(portfolioRepositoryProvider).get();
+  Future<PortfolioData> build() {
+    // Changement de compte → rechargement automatique (pas de cache croisé).
+    ref.watch(currentUserIdProvider);
+    return ref.watch(portfolioRepositoryProvider).get();
+  }
 
   Future<String?> addLot(
     String symbol,

@@ -1,4 +1,5 @@
 import 'package:brvm_mobile/core/api_client.dart';
+import 'package:brvm_mobile/core/providers.dart';
 import 'package:brvm_mobile/core/token_storage.dart';
 import 'package:brvm_mobile/features/chat/chat_models.dart';
 import 'package:brvm_mobile/features/chat/chat_providers.dart';

@@ -24,8 +24,11 @@ class WatchlistTab extends ConsumerWidget {
         ),
         data: (entries) {
           if (entries.isEmpty) {
-            return _WatchlistEmptyView(
-              onAdd: () => _showAddDialog(context, ref),
+            return RefreshIndicator(
+              onRefresh: () async => ref.invalidate(watchlistProvider),
+              child: _WatchlistEmptyView(
+                onAdd: () => _showAddDialog(context, ref),
+              ),
             );
           }
           return RefreshIndicator(

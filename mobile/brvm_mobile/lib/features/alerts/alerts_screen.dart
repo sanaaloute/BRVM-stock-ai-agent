@@ -24,9 +24,12 @@ class AlertsScreen extends ConsumerWidget {
         ),
         data: (items) {
           if (items.isEmpty) {
-            return const EmptyView(
-              message: 'Aucune alerte.\nCréez une alerte pour être notifié quand un titre atteint un cours cible.',
-              icon: Icons.notifications_none,
+            return RefreshIndicator(
+              onRefresh: () async => ref.invalidate(alertsProvider),
+              child: const EmptyView(
+                message: 'Aucune alerte.\nCréez une alerte pour être notifié quand un titre atteint un cours cible.',
+                icon: Icons.notifications_none,
+              ),
             );
           }
           return RefreshIndicator(

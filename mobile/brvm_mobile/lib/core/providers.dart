@@ -22,6 +22,15 @@ final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => AuthRepository(ref.watch(apiClientProvider)),
 );
 
+/// Identifiant de l'utilisateur connecté, `null` tant que l'auth n'est pas
+/// résolue. Les providers de données utilisateur l'observent : tout
+/// changement de compte (connexion, déconnexion, switch) les recharge
+/// automatiquement au lieu de servir le cache du compte précédent.
+final currentUserIdProvider = Provider<String?>((ref) {
+  final auth = ref.watch(authStateProvider);
+  return auth is AuthAuthenticated ? auth.user.id : null;
+});
+
 /// État d'authentification global.
 sealed class AuthState {
   const AuthState();

@@ -27,10 +27,13 @@ class PortfolioScreen extends ConsumerWidget {
         ),
         data: (data) {
           if (data.positions.isEmpty) {
-            return const EmptyView(
-              message:
-                  'Votre portefeuille est vide.\nChaque achat est une ligne : l’application calcule le prix moyen et la valorisation.',
-              icon: Icons.pie_chart_outline,
+            return RefreshIndicator(
+              onRefresh: () async => ref.invalidate(portfolioProvider),
+              child: const EmptyView(
+                message:
+                    'Votre portefeuille est vide.\nChaque achat est une ligne : l’application calcule le prix moyen et la valorisation.',
+                icon: Icons.pie_chart_outline,
+              ),
             );
           }
           return RefreshIndicator(

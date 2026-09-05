@@ -81,8 +81,11 @@ final alertsProvider = AsyncNotifierProvider<AlertsNotifier, List<PriceAlert>>(
 
 class AlertsNotifier extends AsyncNotifier<List<PriceAlert>> {
   @override
-  Future<List<PriceAlert>> build() =>
-      ref.watch(alertsRepositoryProvider).get();
+  Future<List<PriceAlert>> build() {
+    // Changement de compte → rechargement automatique (pas de cache croisé).
+    ref.watch(currentUserIdProvider);
+    return ref.watch(alertsRepositoryProvider).get();
+  }
 
   Future<String?> create(String symbol, double targetPrice, String direction) async {
     final message = await ref

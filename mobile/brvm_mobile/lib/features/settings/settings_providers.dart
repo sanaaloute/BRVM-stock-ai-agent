@@ -76,8 +76,11 @@ final digestProvider =
 
 class DigestNotifier extends AsyncNotifier<DigestSettings> {
   @override
-  Future<DigestSettings> build() =>
-      ref.watch(settingsRepositoryProvider).getDigest();
+  Future<DigestSettings> build() {
+    // Changement de compte → rechargement automatique (pas de cache croisé).
+    ref.watch(currentUserIdProvider);
+    return ref.watch(settingsRepositoryProvider).getDigest();
+  }
 
   Future<String?> save(String frequency, bool enabled) async {
     final message = await ref
@@ -89,11 +92,17 @@ class DigestNotifier extends AsyncNotifier<DigestSettings> {
 }
 
 final quotaProvider = FutureProvider.autoDispose<Quota>(
-  (ref) => ref.watch(settingsRepositoryProvider).getQuota(),
+  (ref) {
+    ref.watch(currentUserIdProvider);
+    return ref.watch(settingsRepositoryProvider).getQuota();
+  },
 );
 
 /// Profil frais de l'utilisateur connecté (GET /mobile/v1/me).
 /// Retombe côté UI sur l'utilisateur de session si l'appel échoue.
 final meProvider = FutureProvider.autoDispose<AuthUser>(
-  (ref) => ref.watch(authRepositoryProvider).me(),
+  (ref) {
+    ref.watch(currentUserIdProvider);
+    return ref.watch(authRepositoryProvider).me();
+  },
 );
