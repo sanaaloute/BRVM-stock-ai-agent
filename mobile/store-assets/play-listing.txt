@@ -1,0 +1,36 @@
+COURTE DESCRIPTION (74 caractères):
+Votre agent boursier IA : cotations BRVM, analyses, portefeuille, alertes.
+
+DESCRIPTION COMPLÈTE (2132 caractères):
+Kora Bourse — votre agent boursier intelligent pour la bourse régionale d'Afrique de l'Ouest.
+
+Suivez la BRVM, analysez les actions et gérez votre portefeuille depuis votre poche, avec l'aide de Kora, un assistant IA qui parle votre langue et connaît le marché.
+
+★ KORA, L'ASSISTANT IA
+Posez vos questions en français : « Quel est le palmarès du jour ? », « Analyse-moi la SONATEL », « Faut-il vendre mes ETIT ? ». Kora répond avec les cours, les chiffres et des graphiques — et se souvient de vos conversations.
+
+★ LE MARCHÉ EN DIRECT
+• Palmarès complet de la bourse régionale : cours, variations, volumes, capitalisations
+• Recherche par symbole ou nom de société, filtres hausse/baisse, tris
+• Fiche détaillée de chaque action : graphique de cours interactif (1M à 5 ans), fondamentaux (PER, bêta, capitalisation), dividendes, actualités, prédiction technique et score
+• Liste de suivi personnalisée
+
+★ VOTRE PORTEFEUILLE
+Chaque achat est une ligne : enregistrez vos lots (prix, quantité, date) et Kora calcule automatiquement votre prix moyen, votre valorisation en FCFA et votre gain/perte. Idéal pour les achats échelonnés.
+
+★ ALERTES DE PRIX
+Définissez un cours cible (au-dessus ou en dessous) sur n'importe quelle action et soyez alerté dès que le seuil est atteint.
+
+★ COURTIERS (SGI)
+Profils détaillés des Sociétés de Gestion et d'Intermédiation de la région : conditions d'ouverture de compte, montants minimums, contacts et sites web — pour choisir votre courtier en connaissance de cause.
+
+★ ACTUALITÉS & DIGEST
+Actualités du marché lisibles directement dans l'application, et résumé quotidien ou hebdomadaire du marché en un coup d'œil.
+
+★ SÉCURITÉ
+Compte protégé par mot de passe, connexions chiffrées HTTPS, données hébergées en toute confidentialité. Politique de confidentialité : https://kbourse.neobytech.net/privacy
+
+⚠ AVERTISSEMENT
+Kora Bourse est un outil d'information. Les contenus générés par l'assistant IA sont informatifs et ne constituent pas un conseil en investissement. La Bourse comporte des risques : investissez en connaissance de cause.
+
+Kora Bourse — l'intelligence du marché, à portée de main.
