@@ -471,6 +471,8 @@ app.include_router(whatsapp_evolution_router)
 # Mobile app (Flutter) API: JWT auth + market/portfolio/chat endpoints.
 from app.api.mobile_auth import router as mobile_auth_router  # noqa: E402
 from app.api.mobile import router as mobile_router  # noqa: E402
+from app.api.privacy import router as privacy_router  # noqa: E402
 
 app.include_router(mobile_auth_router)
 app.include_router(mobile_router)
+app.include_router(privacy_router)

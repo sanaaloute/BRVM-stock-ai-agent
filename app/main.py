@@ -330,3 +330,7 @@ app.include_router(mobile_auth_router)
 
 app.include_router(mobile_router)
 
+from app.api.privacy import router as privacy_router
+
+app.include_router(privacy_router)
+
