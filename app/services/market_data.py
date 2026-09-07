@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
+import config
 from app.db import engine as db_engine
 from app.db import migrate as db_migrate
 from app.db import models as db_models
@@ -152,7 +153,8 @@ def due_daily_refresh(now_utc: datetime | None = None) -> bool:
 
 async def scheduled_refresh_loop() -> None:
     """Background task: every 10 minutes, take the daily post-close snapshot
-    when due. Runs in the API process (both run_api.py and main.py)."""
+    when due, then compute the daily AI predictions from the fresh close.
+    Runs in the API process (both run_api.py and main.py)."""
     import asyncio
 
     while True:
@@ -165,3 +167,14 @@ async def scheduled_refresh_loop() -> None:
             break
         except Exception as e:
             logger.warning("Scheduled market refresh failed: %s", e)
+        try:
+            if config.PREDICTIONS_ENABLED:
+                from app.services import predictions
+
+                if predictions.predictions_due():
+                    await asyncio.to_thread(predictions.run_daily_predictions)
+                    logger.info("Daily AI predictions computed after close.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Scheduled predictions run failed: %s", e)

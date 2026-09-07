@@ -32,7 +32,7 @@ _HTML = """<!DOCTYPE html>
 </head>
 <body>
 <h1>Kora Bourse — Politique de confidentialité</h1>
-<p class="sub">Dernière mise à jour : 5 septembre 2026</p>
+<p class="sub">Dernière mise à jour : 7 septembre 2026</p>
 
 <p>Kora Bourse (« l'Application ») est un assistant d'investissement pour la
 bourse régionale d'Afrique de l'Ouest, édité par NeoBytech. Cette politique
@@ -81,25 +81,40 @@ mêmes obligations.</p>
 
 <h2>5. Conservation et suppression</h2>
 <p>Les données sont conservées tant que votre compte est actif. Vous pouvez
+supprimer votre compte directement dans l'Application (voir section 6), ou
 demander à tout moment la consultation ou la <strong>suppression définitive
 de vos données</strong> en écrivant à
-<a href="mailto:{email}">{email}</a>. La suppression est effectuée sous 30
-jours.</p>
+<a href="mailto:{email}">{email}</a> ; la suppression est alors effectuée
+sous 30 jours.</p>
 
-<h2>6. Cookies et traceurs</h2>
+<h2>6. Suppression du compte</h2>
+<p>Vous pouvez supprimer votre compte à tout moment, directement dans
+l'Application : <strong>Compte → Supprimer mon compte</strong>. La suppression
+est <strong>immédiate et définitive</strong> ; elle efface :</p>
+<ul>
+  <li>votre identifiant de connexion (e-mail ou numéro de téléphone) et votre
+      mot de passe ;</li>
+  <li>vos sessions, jetons d'accès et appareils enregistrés ;</li>
+  <li>vos portefeuilles, listes de suivi, alertes de prix et abonnement au
+      digest ;</li>
+  <li>l'historique de vos conversations avec l'assistant IA ;</li>
+  <li>vos données d'usage et préférences.</li>
+</ul>
+
+<h2>7. Cookies et traceurs</h2>
 <p>L'Application et cette page n'utilisent <strong>aucun cookie ni traceur
 publicitaire</strong>.</p>
 
-<h2>7. Mineurs</h2>
+<h2>8. Mineurs</h2>
 <p>L'Application s'adresse à un public adulte (investisseurs). Elle n'est pas
 destinée aux enfants de moins de 13 ans.</p>
 
-<h2>8. Modifications</h2>
+<h2>9. Modifications</h2>
 <p>Cette politique peut être mise à jour ; la date de dernière révision figure
 en tête de page. Toute modification substantielle sera signalée dans
 l'Application.</p>
 
-<h2>9. Contact</h2>
+<h2>10. Contact</h2>
 <p>Éditeur : NeoBytech — {email}</p>
 
 <footer>Kora Bourse — NeoBytech. Les contenus générés par l'assistant IA sont

@@ -367,6 +367,20 @@ DIGEST_HOUR_GMT = int(os.getenv("DIGEST_HOUR_GMT", "18").strip() or "18")
 
 
 
+# AI predictions (app/services/predictions.py): daily post-close direction +
+
+# confidence per symbol, served to the mobile app. The LLM only words the
+
+# explanation (PREDICTIONS_LLM_ENABLED=false => deterministic fallback text).
+
+PREDICTIONS_ENABLED = os.getenv("PREDICTIONS_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+PREDICTIONS_LLM_ENABLED = os.getenv("PREDICTIONS_LLM_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+PREDICTIONS_LLM_CONCURRENCY = int(os.getenv("PREDICTIONS_LLM_CONCURRENCY", "3").strip() or "3")
+
+
+
 # --- Mobile app (Flutter) auth & notifications ---
 
 # JWT signing key for mobile user tokens (access/refresh). Empty = mobile auth

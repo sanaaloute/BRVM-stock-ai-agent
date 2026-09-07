@@ -290,3 +290,29 @@ class ScoreSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class AiPrediction(Base):
+    """Daily post-close AI prediction per symbol (direction, confidence,
+    targets). Computed by app.services.predictions after market close; the
+    mobile API serves the latest day."""
+
+    __tablename__ = "ai_predictions"
+    __table_args__ = (Index("idx_predictions_symbol_day", "symbol", "day"),)
+
+    id: Mapped[int] = mapped_column(_pk_int, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    day: Mapped[str] = mapped_column(Text, nullable=False)  # YYYY-MM-DD (UTC)
+    direction: Mapped[str] = mapped_column(Text, nullable=False, server_default="")  # hausse|baisse|neutre
+    confidence_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_move_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    signal: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    explanation: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

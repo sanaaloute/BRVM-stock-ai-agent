@@ -680,3 +680,113 @@ def get_previous_snapshots(before_day: str) -> list[dict[str, Any]]:
     if day is None:
         return []
     return _snapshots_for_day(day)
+
+
+# --- AI predictions ---
+def save_predictions(rows: list[dict]) -> None:
+    """Persist one AI prediction per symbol for a day (default: today UTC).
+
+    Idempotent daily write: existing rows for the same (symbol, day) are
+    replaced. Row keys: symbol, direction; optional day, confidence_pct,
+    expected_move_pct, price, target_low, target_high, score, signal,
+    explanation, details (object) or details_json (pre-serialized string).
+    """
+    if not rows:
+        return
+    _ensure_ready()
+    today = _today_utc()
+
+    def _f(value: Any) -> float | None:
+        return float(value) if value is not None else None
+
+    normalized = []
+    for r in rows:
+        symbol = str(r.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        details = r.get("details_json")
+        if details is None:
+            details = json.dumps(r.get("details") or {}, ensure_ascii=False)
+        normalized.append({
+            "symbol": symbol,
+            "day": str(r.get("day") or today),
+            "direction": str(r.get("direction") or ""),
+            "confidence_pct": _f(r.get("confidence_pct")),
+            "expected_move_pct": _f(r.get("expected_move_pct")),
+            "price": _f(r.get("price")),
+            "target_low": _f(r.get("target_low")),
+            "target_high": _f(r.get("target_high")),
+            "score": _f(r.get("score")),
+            "signal": str(r.get("signal") or ""),
+            "explanation": str(r.get("explanation") or ""),
+            "details_json": details,
+        })
+    with db_engine.session_scope() as s:
+        for symbol, day in {(r["symbol"], r["day"]) for r in normalized}:
+            s.execute(
+                delete(models.AiPrediction).where(
+                    models.AiPrediction.symbol == symbol,
+                    models.AiPrediction.day == day,
+                )
+            )
+        if normalized:
+            s.execute(models.AiPrediction.__table__.insert(), normalized)
+
+
+_PREDICTION_COLUMNS = (
+    models.AiPrediction.symbol,
+    models.AiPrediction.day,
+    models.AiPrediction.direction,
+    models.AiPrediction.confidence_pct,
+    models.AiPrediction.expected_move_pct,
+    models.AiPrediction.price,
+    models.AiPrediction.target_low,
+    models.AiPrediction.target_high,
+    models.AiPrediction.score,
+    models.AiPrediction.signal,
+    models.AiPrediction.explanation,
+    models.AiPrediction.details_json,
+    models.AiPrediction.created_at,
+)
+
+
+def _predictions_for_day(day: str) -> list[dict[str, Any]]:
+    with db_engine.session_scope() as s:
+        rows = s.execute(
+            select(*_PREDICTION_COLUMNS)
+            .where(models.AiPrediction.day == day)
+            .order_by(models.AiPrediction.symbol)
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+def get_latest_predictions(day: str | None = None) -> list[dict[str, Any]]:
+    """Predictions for `day` (default: the most recent day with data)."""
+    _ensure_ready()
+    if day is None:
+        day = get_latest_prediction_day()
+        if day is None:
+            return []
+    return _predictions_for_day(day)
+
+
+def get_prediction(symbol: str) -> dict[str, Any] | None:
+    """Most recent prediction row for one symbol (None when never computed)."""
+    _ensure_ready()
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    with db_engine.session_scope() as s:
+        row = s.execute(
+            select(*_PREDICTION_COLUMNS)
+            .where(models.AiPrediction.symbol == sym)
+            .order_by(models.AiPrediction.day.desc())
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+def get_latest_prediction_day() -> str | None:
+    """Most recent day with predictions (None when never computed)."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        return s.execute(select(func.max(models.AiPrediction.day))).scalar()

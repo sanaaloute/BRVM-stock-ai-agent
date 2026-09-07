@@ -5,6 +5,7 @@ shared with the Telegram identity when the accounts are linked.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,6 +31,62 @@ def market_palmares(user: dict = Depends(require_app_user)) -> dict[str, Any]:
 
     stocks = palmares_for_api()
     return {"stocks": stocks}
+
+
+@router.get("/market/predictions")
+def market_predictions(user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Latest daily AI predictions (computed post-close), most confident first.
+    Empty list + day=None until the first post-close run."""
+    from app.utils.brvm_companies import get_symbol_to_name
+
+    rows = user_db.get_latest_predictions()
+    names = get_symbol_to_name()
+    items = [{
+        "symbol": r["symbol"],
+        "name": names.get(r["symbol"]),
+        "price": r.get("price"),
+        "direction": r.get("direction"),
+        "confidence_pct": r.get("confidence_pct"),
+        "expected_move_pct": r.get("expected_move_pct"),
+        "score": r.get("score"),
+        "signal": r.get("signal"),
+    } for r in rows]
+    items.sort(key=lambda r: r["confidence_pct"] or 0.0, reverse=True)
+    return {"day": rows[0]["day"] if rows else None, "predictions": items}
+
+
+@router.get("/market/predictions/{symbol}")
+def market_prediction_detail(symbol: str, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Full prediction for one symbol: targets, explanation, computed metrics."""
+    from app.utils.brvm_companies import get_symbol_to_name
+
+    sym = symbol.strip().upper()
+    if sym not in user_db.get_valid_symbols():
+        raise HTTPException(status_code=404, detail=f"{sym} n'est pas un symbole BRVM coté.")
+    row = user_db.get_prediction(sym)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Aucune prévision disponible pour {sym}.")
+    try:
+        details = json.loads(row.get("details_json") or "{}")
+    except (TypeError, ValueError):
+        details = {}
+    if not isinstance(details, dict):
+        details = {}
+    return {
+        "symbol": row["symbol"],
+        "name": get_symbol_to_name().get(sym),
+        "day": row.get("day"),
+        "price": row.get("price"),
+        "direction": row.get("direction"),
+        "confidence_pct": row.get("confidence_pct"),
+        "expected_move_pct": row.get("expected_move_pct"),
+        "target_low": row.get("target_low"),
+        "target_high": row.get("target_high"),
+        "score": row.get("score"),
+        "signal": row.get("signal"),
+        "explanation": row.get("explanation"),
+        "details": details,
+    }
 
 
 @router.get("/market/quotes/{symbol}")
@@ -457,7 +514,23 @@ def me_get(user: dict = Depends(require_app_user)) -> dict[str, Any]:
         "email": fresh.get("email"),
         "phone": fresh.get("phone"),
         "has_telegram": fresh.get("telegram_id") is not None,
+        "has_password": bool(fresh.get("has_password")),
     }
+
+
+class DeleteAccountBody(BaseModel):
+    password: str | None = Field(default=None, max_length=200)
+
+
+@router.delete("/me")
+def me_delete(body: DeleteAccountBody | None = None, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Delete the account and all its data (Google Play requirement). Accounts
+    with a password must confirm it; passwordless (demo) accounts delete
+    without one. Body is optional."""
+    result = auth_service.delete_app_user(user, password=body.password if body else None)
+    if not result.get("ok"):
+        raise HTTPException(status_code=401, detail="Mot de passe incorrect.")
+    return {"ok": True}
 
 
 def user_key(user: dict[str, Any]) -> str:

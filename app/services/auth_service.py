@@ -212,6 +212,8 @@ def _user_dict(row: models.AppUser) -> dict[str, Any]:
         "email": row.email,
         "phone": row.phone,
         "telegram_id": row.telegram_id,
+        # Boolean only — the hash itself must never leave this module.
+        "has_password": row.password_hash is not None,
     }
 
 
@@ -252,6 +254,72 @@ def get_app_user_by_id(user_id: uuid.UUID) -> dict[str, Any] | None:
             select(models.AppUser).where(models.AppUser.id == user_id)
         ).scalars().first()
         return _user_dict(row) if row else None
+
+
+def delete_app_user(user: dict[str, Any], password: str | None = None) -> dict[str, Any]:
+    """Delete an app account and every row it owns, in one transaction.
+
+    Accounts with a password must confirm it (``wrong_password`` otherwise);
+    passwordless accounts (demo/mock) delete without one. LangGraph
+    checkpoints live outside this DB and are purged best-effort afterwards —
+    their failure never rolls the account deletion back. DB purge errors may
+    propagate.
+    """
+    db_migrate.ensure_schema()
+    thread_ids: list[str] = []
+    with db_engine.session_scope() as s:
+        row = s.execute(
+            select(models.AppUser).where(models.AppUser.id == user["id"])
+        ).scalars().first()
+        if row is None:
+            return {"ok": True}  # already gone: deletion is idempotent
+        if row.password_hash is not None and (
+            not password or not verify_password(password, row.password_hash)
+        ):
+            return {"ok": False, "error": "wrong_password"}
+
+        user_id = row.id
+        principal_id = row.principal_id
+        identifiers = [v for v in (row.email, row.phone) if v]
+        prefix = f"app:{user_id}"
+        thread_match = (models.ThreadActivity.thread_id == prefix) | (
+            models.ThreadActivity.thread_id.like(prefix + ":%")
+        )
+        thread_ids = list(
+            s.execute(
+                select(models.ThreadActivity.thread_id).where(thread_match)
+            ).scalars().all()
+        )
+        # FK-referenced children first, the app_users row last.
+        s.execute(delete(models.RefreshToken).where(models.RefreshToken.user_id == user_id))
+        s.execute(delete(models.Device).where(models.Device.user_id == user_id))
+        for model in (
+            models.Portfolio,
+            models.Tracking,
+            models.TargetAlert,
+            models.DigestSubscription,
+            models.User,
+        ):
+            s.execute(delete(model).where(model.telegram_id == principal_id))
+        s.execute(delete(models.UsageDaily).where(models.UsageDaily.user_id == prefix))
+        s.execute(delete(models.ThreadActivity).where(thread_match))
+        if identifiers:
+            s.execute(delete(models.OtpCode).where(models.OtpCode.identifier.in_(identifiers)))
+        s.execute(delete(models.AppUser).where(models.AppUser.id == user_id))
+
+    if thread_ids:
+        try:
+            from app.api.chat import _get_checkpointer  # lazy: avoid circulars
+
+            checkpointer = _get_checkpointer()
+            for tid in thread_ids:
+                try:
+                    checkpointer.delete_thread(tid)
+                except Exception:
+                    logger.warning("checkpoint purge failed for thread %s", tid, exc_info=True)
+        except Exception:
+            logger.warning("checkpointer unavailable during account deletion", exc_info=True)
+    return {"ok": True}
 
 
 # --- JWT access/refresh tokens ------------------------------------------------
@@ -425,6 +493,8 @@ def register_user(identifier: str, password: str) -> tuple[dict[str, Any] | None
     if user is None:
         return None, "invalid_identifier"
     set_user_password(user["id"], password)
+    # The dict above was built before the password was set; keep it accurate.
+    user["has_password"] = True
     return user, None
 
 

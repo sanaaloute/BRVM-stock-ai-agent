@@ -60,6 +60,7 @@ def _public_user(user: dict[str, Any]) -> dict[str, Any]:
         "email": user.get("email"),
         "phone": user.get("phone"),
         "has_telegram": user.get("telegram_id") is not None,
+        "has_password": bool(user.get("has_password")),
     }
 
 
