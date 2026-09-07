@@ -6,7 +6,9 @@ IA intégré se nomme **Kora**.
 
 Fonctionnalités :
 
-- **Authentification** par e-mail **ou** téléphone, via code OTP à 6 chiffres.
+- **Authentification** par e-mail **ou** téléphone (avec sélecteur d'indicatif,
+  +225 par défaut) + mot de passe (6 caractères minimum) ; mode démo
+  disponible uniquement dans les builds de développement.
 - **Marché** : palmarès, fiches investisseur détaillées (graphique, score IA,
   fondamentaux, dividendes, actualités), liste de suivi (watchlist),
   courtiers, actualités.
@@ -81,7 +83,8 @@ l'application n'a pas besoin de changer, et le backend expose déjà
 lib/
 ├── core/            # client API (Dio + intercepteurs), jetons, auth, config
 ├── features/
-│   ├── auth/        # écrans de connexion OTP + validation d'identifiant
+│   ├── auth/        # écran de connexion/création de compte (identifiant + mot de passe)
+│   │                # et validation/normalisation d'identifiant
 │   ├── market/      # palmarès, fiches, courtiers, actualités, watchlist tab
 │   ├── chat/        # conversations + écran de chat (bulles, graphiques)
 │   ├── portfolio/   # positions + formulaire

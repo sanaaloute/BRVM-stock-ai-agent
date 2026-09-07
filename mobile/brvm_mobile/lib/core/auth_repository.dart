@@ -64,6 +64,7 @@ class AuthRepository {
         case 409:
           throw const AuthException(
             'Un compte existe déjà pour cet identifiant. Connectez-vous.',
+            code: 'account_exists',
           );
         case 429:
           throw AuthException(

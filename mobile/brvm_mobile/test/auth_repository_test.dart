@@ -181,6 +181,7 @@ void main() {
       } on AuthException catch (e) {
         expect(e.message, contains('existe déjà'));
         expect(e.message, contains('Connectez-vous'));
+        expect(e.code, 'account_exists');
       }
     });
 

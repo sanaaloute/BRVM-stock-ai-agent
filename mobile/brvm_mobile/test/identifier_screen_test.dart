@@ -47,16 +47,24 @@ void main() {
     await pumpScreen(tester);
     await switchToRegister(tester);
 
+    // Aide affichée en mode inscription.
+    expect(find.textContaining('6 caractères minimum'), findsOneWidget);
+
     await tester.enterText(
       find.byKey(const Key('identifier-field')),
       'trader@brvm.ci',
     );
     await tester.enterText(find.byKey(const Key('password-field')), 'abc');
     await tester.enterText(find.byKey(const Key('confirm-field')), 'abc');
+    await tester.ensureVisible(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pump();
 
-    expect(find.textContaining('8 caractères'), findsOneWidget);
+    expect(
+      find.text('Le mot de passe doit contenir au moins 6 caractères.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('inscription : confirmation différente rejetée', (tester) async {
@@ -69,6 +77,8 @@ void main() {
     );
     await tester.enterText(find.byKey(const Key('password-field')), 'password1');
     await tester.enterText(find.byKey(const Key('confirm-field')), 'password2');
+    await tester.ensureVisible(find.byKey(const Key('auth-submit')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('auth-submit')));
     await tester.pump();
 

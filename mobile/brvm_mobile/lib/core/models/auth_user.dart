@@ -1,6 +1,7 @@
 import '../json_utils.dart';
 
-/// Utilisateur authentifié (tel que renvoyé par /mobile/v1/auth/verify-code).
+/// Utilisateur authentifié (tel que renvoyé par /mobile/v1/auth/register
+/// ou /mobile/v1/auth/login).
 class AuthUser {
   const AuthUser({
     required this.id,
@@ -62,10 +63,14 @@ class AuthSession {
 
 /// Exception métier renvoyée par [AuthRepository].
 class AuthException implements Exception {
-  const AuthException(this.message, {this.statusCode});
+  const AuthException(this.message, {this.statusCode, this.code});
 
   final String message;
   final int? statusCode;
+
+  /// Code machine stable pour certains cas (ex. `account_exists` en 409
+  /// à l'inscription) ; `null` sinon.
+  final String? code;
 
   @override
   String toString() => message;

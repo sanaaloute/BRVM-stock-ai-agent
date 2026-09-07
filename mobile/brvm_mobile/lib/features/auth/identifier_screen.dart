@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode, kProfileMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,6 +16,19 @@ class IdentifierScreen extends ConsumerStatefulWidget {
 }
 
 class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
+  /// Indicatifs proposés ; chaîne vide = le numéro saisi contient déjà
+  /// l'indicatif international (« + »).
+  static const List<(String, String)> _dialCodes = <(String, String)>[
+    ('+225', 'Côte d’Ivoire'),
+    ('+221', 'Sénégal'),
+    ('+226', 'Burkina Faso'),
+    ('+223', 'Mali'),
+    ('+228', 'Togo'),
+    ('+229', 'Bénin'),
+    ('+245', 'Guinée-Bissau'),
+    ('', 'Indicatif déjà inclus (+…)'),
+  ];
+
   final _formKey = GlobalKey<FormState>();
   final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -24,6 +38,7 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
   bool _obscureConfirm = true;
   bool _submitting = false;
   bool _demoLoading = false;
+  String _selectedDialCode = '+225';
   String? _error;
 
   @override
@@ -35,7 +50,7 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
   }
 
   static const _weakPasswordMessage =
-      'Le mot de passe doit contenir au moins 8 caractères.';
+      'Le mot de passe doit contenir au moins 6 caractères.';
 
   Future<void> _submit() async {
     final identifierError = validateIdentifier(_identifierController.text);
@@ -43,7 +58,7 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
       setState(() => _error = identifierError);
       return;
     }
-    if (_isRegister && _passwordController.text.length < 8) {
+    if (_isRegister && _passwordController.text.length < 6) {
       setState(() => _error = _weakPasswordMessage);
       return;
     }
@@ -56,7 +71,8 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
       _error = null;
       _submitting = true;
     });
-    final identifier = _identifierController.text.trim();
+    final identifier =
+        normalizeIdentifier(_identifierController.text, _selectedDialCode);
     final password = _passwordController.text;
     final error = _isRegister
         ? await ref
@@ -68,9 +84,39 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
     if (!mounted) return;
     setState(() => _submitting = false);
     if (error != null) {
-      setState(() => _error = error);
+      if (_isRegister && error.code == 'account_exists') {
+        await _showAccountExistsDialog();
+      } else {
+        setState(() => _error = error.message);
+      }
     }
     // En cas de succès, le redirect du routeur bascule vers l'accueil.
+  }
+
+  Future<void> _showAccountExistsDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Compte existant'),
+        content: const Text('Un compte existe déjà pour cet identifiant.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Fermer'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              setState(() {
+                _isRegister = false;
+                _passwordController.clear();
+              });
+            },
+            child: const Text('Se connecter'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _demoLogin() async {
@@ -137,14 +183,45 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                           () => _isRegister = selection.first),
                     ),
                     const SizedBox(height: 20),
+                    DropdownButtonFormField<String>(
+                      key: const Key('dial-code-field'),
+                      initialValue: _selectedDialCode,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Indicatif téléphonique',
+                        prefixIcon: Icon(Icons.public),
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _dialCodes
+                          .map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.$1,
+                              child: Text(
+                                entry.$1.isEmpty
+                                    ? entry.$2
+                                    : '${entry.$1} ${entry.$2}',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) => setState(
+                          () => _selectedDialCode = value ?? '+225'),
+                    ),
+                    const SizedBox(height: 12),
                     TextFormField(
                       key: const Key('identifier-field'),
                       controller: _identifierController,
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
+                      autofillHints: const <String>[
+                        AutofillHints.email,
+                        AutofillHints.telephoneNumber,
+                      ],
                       decoration: const InputDecoration(
                         labelText: 'E-mail ou numéro de téléphone',
-                        hintText: 'exemple@domaine.com ou +225 07 00 00 00',
+                        hintText: 'exemple@domaine.com ou 07 00 00 00 00',
+                        helperText:
+                            'L’indicatif choisi ci-dessus s’applique aux numéros saisis sans « + ».',
                         prefixIcon: Icon(Icons.person_outline),
                         border: OutlineInputBorder(),
                       ),
@@ -156,11 +233,15 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                       obscureText: _obscurePassword,
                       textInputAction:
                           _isRegister ? TextInputAction.next : TextInputAction.done,
+                      autofillHints: const <String>[AutofillHints.password],
                       onFieldSubmitted: (_) {
                         if (!_isRegister) _submit();
                       },
                       decoration: InputDecoration(
                         labelText: 'Mot de passe',
+                        helperText: _isRegister
+                            ? '6 caractères minimum — lettres, chiffres ou symboles.'
+                            : null,
                         prefixIcon: const Icon(Icons.lock_outline),
                         border: const OutlineInputBorder(),
                         suffixIcon: IconButton(
@@ -182,6 +263,9 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                         controller: _confirmController,
                         obscureText: _obscureConfirm,
                         textInputAction: TextInputAction.done,
+                        autofillHints: const <String>[
+                          AutofillHints.newPassword,
+                        ],
                         onFieldSubmitted: (_) => _submit(),
                         decoration: InputDecoration(
                           labelText: 'Confirmer le mot de passe',
@@ -223,25 +307,27 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                           ?.copyWith(color: theme.colorScheme.muted),
                     ),
                     const SizedBox(height: 24),
-                    OutlinedButton.icon(
-                      key: const Key('demo-login'),
-                      onPressed: _demoLoading ? null : _demoLogin,
-                      icon: _demoLoading
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.bolt_outlined),
-                      label: const Text('Explorer sans compte (mode démo)'),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Mode démo : accès immédiat quand le serveur l’autorise.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.muted),
-                    ),
+                    if (kDebugMode || kProfileMode) ...<Widget>[
+                      OutlinedButton.icon(
+                        key: const Key('demo-login'),
+                        onPressed: _demoLoading ? null : _demoLogin,
+                        icon: _demoLoading
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.bolt_outlined),
+                        label: const Text('Explorer sans compte (mode démo)'),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Mode démo : accès immédiat quand le serveur l’autorise.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.muted),
+                      ),
+                    ],
                   ],
                 ),
               ),

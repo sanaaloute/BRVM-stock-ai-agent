@@ -94,9 +94,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// Connecte l'utilisateur. Retourne `null` si OK, sinon le message
-  /// d'erreur à afficher.
-  Future<String?> login(String identifier, String password) async {
+  /// Connecte l'utilisateur. Retourne `null` si OK, sinon l'exception
+  /// d'erreur à afficher (`e.message`).
+  Future<AuthException?> login(String identifier, String password) async {
     try {
       final session =
           await _ref.read(authRepositoryProvider).login(identifier, password);
@@ -105,13 +105,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       unawaited(_registerDevice());
       return null;
     } on AuthException catch (e) {
-      return e.message;
+      return e;
     }
   }
 
   /// Crée un compte puis ouvre la session (même flux que [login]).
-  /// Retourne `null` si OK, sinon le message d'erreur à afficher.
-  Future<String?> register(String identifier, String password) async {
+  /// Retourne `null` si OK, sinon l'exception d'erreur à afficher
+  /// (`e.message`).
+  Future<AuthException?> register(String identifier, String password) async {
     try {
       final session = await _ref
           .read(authRepositoryProvider)
@@ -121,7 +122,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       unawaited(_registerDevice());
       return null;
     } on AuthException catch (e) {
-      return e.message;
+      return e;
     }
   }
 
