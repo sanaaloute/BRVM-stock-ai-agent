@@ -59,10 +59,14 @@ void main() {
       expect(response.imagesBase64, <String>['aGVsbG8=']);
     });
 
-    test('clarification utilisée quand pas de reply', () {
+    test('clarification : drapeau booléen, texte dans reply', () {
+      // Contrat backend (app/api/chat.py) : le texte de la clarification
+      // voyage dans `reply`, `clarification` est un booléen.
       final response = ChatResponse.fromJson(<String, dynamic>{
-        'clarification': 'De quel titre parlez-vous ?',
+        'reply': 'De quel titre parlez-vous ?',
+        'clarification': true,
       });
+      expect(response.clarification, isTrue);
       expect(response.displayText, 'De quel titre parlez-vous ?');
     });
 

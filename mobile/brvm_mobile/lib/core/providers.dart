@@ -145,6 +145,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> signOut() async {
     final storage = _ref.read(storageProvider);
     final refreshToken = await storage.readRefreshToken();
+    await _unregisterDevice();
     if (refreshToken != null && refreshToken.isNotEmpty) {
       try {
         await _ref.read(authRepositoryProvider).logout(refreshToken);
@@ -154,6 +155,39 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
     await storage.clear();
     state = const AuthUnauthenticated();
+  }
+
+  /// Supprime définitivement le compte côté serveur puis efface la session
+  /// locale. Retourne `null` si OK, sinon le message d'erreur à afficher.
+  /// Pas de logout serveur (contrairement à [signOut]) : le compte et ses
+  /// jetons n'existent déjà plus après le DELETE.
+  Future<String?> deleteAccount({String? password}) async {
+    try {
+      await _ref
+          .read(authRepositoryProvider)
+          .deleteAccount(password: password);
+    } on AuthException catch (e) {
+      return e.message;
+    }
+    await _ref.read(storageProvider).clear();
+    state = const AuthUnauthenticated();
+    return null;
+  }
+
+  /// Supprime le jeton FCM côté backend pour ne plus recevoir de
+  /// notifications push après déconnexion. Meilleur effort : non bloquant.
+  Future<void> _unregisterDevice() async {
+    final push = PushService.instance;
+    if (!push.isAvailable) return;
+    try {
+      final token = await push.getToken();
+      if (token == null || token.isEmpty) return;
+      await _ref
+          .read(apiClientProvider)
+          .delete('${AppConfig.apiPrefix}/devices/${Uri.encodeComponent(token)}');
+    } catch (_) {
+      // Non bloquant.
+    }
   }
 
   /// Envoie le jeton FCM au backend pour les notifications push.

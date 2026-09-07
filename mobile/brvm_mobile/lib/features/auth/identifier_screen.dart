@@ -220,8 +220,6 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                       decoration: const InputDecoration(
                         labelText: 'E-mail ou numéro de téléphone',
                         hintText: 'exemple@domaine.com ou 07 00 00 00 00',
-                        helperText:
-                            'L’indicatif choisi ci-dessus s’applique aux numéros saisis sans « + ».',
                         prefixIcon: Icon(Icons.person_outline),
                         border: OutlineInputBorder(),
                       ),
@@ -299,13 +297,6 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                               ? 'Créer mon compte'
                               : 'Se connecter'),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Créez votre compte local : e-mail ou numéro + mot de passe.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.muted),
-                    ),
                     const SizedBox(height: 24),
                     if (kDebugMode || kProfileMode) ...<Widget>[
                       OutlinedButton.icon(
@@ -319,13 +310,6 @@ class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
                               )
                             : const Icon(Icons.bolt_outlined),
                         label: const Text('Explorer sans compte (mode démo)'),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Mode démo : accès immédiat quand le serveur l’autorise.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.muted),
                       ),
                     ],
                   ],

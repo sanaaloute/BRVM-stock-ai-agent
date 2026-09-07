@@ -231,9 +231,7 @@ class _WatchlistEmptyView extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Suivez des actions pour les retrouver ici : touchez le '
-                    'bouton ci-dessous et saisissez un symbole coté '
-                    '(ex. SONATEL), puis ouvrez-le pour suivre son cours.',
+                    'Suivez des actions pour les retrouver ici.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: colors.muted),

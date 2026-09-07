@@ -202,6 +202,51 @@ void main() {
     });
   });
 
+  group('AuthRepository.deleteAccount', () {
+    test('succès → DELETE /me avec le mot de passe dans le corps', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{'ok': true}, 200),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      await repo.deleteAccount(password: 'motdepasse');
+
+      final request = adapter.requests.single;
+      expect(request.method, 'DELETE');
+      expect(request.path, '/mobile/v1/me');
+      final sent = request.data as Map<String, dynamic>;
+      expect(sent['password'], 'motdepasse');
+    });
+
+    test('sans mot de passe (compte démo) → DELETE /me sans corps', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(<String, dynamic>{'ok': true}, 200),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      await repo.deleteAccount();
+
+      expect(adapter.requests.single.data, isNull);
+    });
+
+    test('401 → mot de passe incorrect', () async {
+      final adapter = MockAdapter(
+        (options) => jsonResponse(
+          <String, String>{'detail': 'Mot de passe incorrect.'},
+          401,
+        ),
+      );
+      final repo = AuthRepository(buildClient(adapter));
+
+      try {
+        await repo.deleteAccount(password: 'mauvais');
+        fail('devrait lever AuthException');
+      } on AuthException catch (e) {
+        expect(e.message, 'Mot de passe incorrect.');
+      }
+    });
+  });
+
   group('ApiClient — renouvellement du jeton (401 → refresh → retry)', () {
     test('rejoue la requête après un refresh réussi et stocke les nouveaux jetons',
         () async {

@@ -4,25 +4,32 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/format.dart';
 import '../../core/ui.dart';
+import '../predictions/predictions_tab.dart';
 import 'market_models.dart';
 import 'market_providers.dart';
 import 'market_tabs.dart';
 
-/// Onglet « Marché » : actions (palmarès), liste de suivi, SGI et actualités.
+/// Onglet « Marché » : actions (palmarès), prévisions IA, liste de suivi,
+/// SGI et actualités.
 class MarketScreen extends StatelessWidget {
   const MarketScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: const KoraAppBar(
           title: Text('Le Marché'),
           bottom: TabBar(
             isScrollable: true,
+            // Material 3 décale les TabBar scrollables de 52 dp au départ
+            // (TabAlignment.startOffset) : forcer l'alignement à gauche.
+            tabAlignment: TabAlignment.start,
+            padding: EdgeInsets.zero,
             tabs: <Widget>[
               Tab(text: 'Actions', icon: Icon(Icons.leaderboard_outlined)),
+              Tab(text: 'Prévisions', icon: Icon(Icons.auto_graph_outlined)),
               Tab(text: 'Suivi', icon: Icon(Icons.star_outline)),
               Tab(text: 'SGI', icon: Icon(Icons.business_outlined)),
               Tab(text: 'Actualités', icon: Icon(Icons.newspaper_outlined)),
@@ -32,6 +39,7 @@ class MarketScreen extends StatelessWidget {
         body: const TabBarView(
           children: <Widget>[
             PalmaresTab(),
+            PredictionsTab(),
             WatchlistTab(),
             BrokersTab(),
             NewsTab(),

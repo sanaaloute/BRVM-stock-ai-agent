@@ -146,8 +146,12 @@ class ApiClient {
       dio.put<dynamic>(path,
           data: data, options: _withTimeout(options, timeout));
 
-  Future<Response<dynamic>> delete(String path, {Options? options}) =>
-      dio.delete<dynamic>(path, options: options);
+  Future<Response<dynamic>> delete(
+    String path, {
+    Object? data,
+    Options? options,
+  }) =>
+      dio.delete<dynamic>(path, data: data, options: options);
 
   Options? _withTimeout(Options? options, Duration? timeout) {
     if (timeout == null) return options;

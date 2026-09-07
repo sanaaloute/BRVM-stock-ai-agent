@@ -30,8 +30,7 @@ class PortfolioScreen extends ConsumerWidget {
             return RefreshIndicator(
               onRefresh: () async => ref.invalidate(portfolioProvider),
               child: const EmptyView(
-                message:
-                    'Votre portefeuille est vide.\nChaque achat est une ligne : l’application calcule le prix moyen et la valorisation.',
+                message: 'Votre portefeuille est vide.',
                 icon: Icons.pie_chart_outline,
               ),
             );
@@ -668,14 +667,6 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Text(
-                  'Chaque ajout crée une ligne d’achat (lot) ; le prix moyen et la valorisation sont calculés automatiquement.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: Theme.of(context).colorScheme.muted),
-                ),
-                const SizedBox(height: 16),
                 if (knownSymbols.isNotEmpty)
                   Autocomplete<String>(
                     optionsBuilder: (value) {

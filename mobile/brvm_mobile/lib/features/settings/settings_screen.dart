@@ -10,7 +10,7 @@ import '../../core/ui.dart';
 import 'settings_providers.dart';
 
 /// Onglet « Moi » (Compte) : profil, apparence (thème), digest,
-/// notifications, quota, version, déconnexion.
+/// notifications, quota, version, déconnexion et suppression du compte.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -105,9 +105,11 @@ class SettingsScreen extends ConsumerWidget {
                 child: LoadingView(),
               ),
             ),
-            error: (error, _) => ErrorView(
-              message: 'Digest indisponible.\n$error',
-              onRetry: () => ref.invalidate(digestProvider),
+            error: (error, _) => Card(
+              child: ErrorView(
+                message: 'Digest indisponible.\n$error',
+                onRetry: () => ref.invalidate(digestProvider),
+              ),
             ),
             data: (settings) => Card(
               child: Column(
@@ -180,9 +182,11 @@ class SettingsScreen extends ConsumerWidget {
                 child: LoadingView(),
               ),
             ),
-            error: (error, _) => ErrorView(
-              message: 'Quota indisponible.\n$error',
-              onRetry: () => ref.invalidate(quotaProvider),
+            error: (error, _) => Card(
+              child: ErrorView(
+                message: 'Quota indisponible.\n$error',
+                onRetry: () => ref.invalidate(quotaProvider),
+              ),
             ),
             data: (q) => Card(
               child: ListTile(
@@ -203,6 +207,26 @@ class SettingsScreen extends ConsumerWidget {
               onPressed: () => _confirmSignOut(context, ref),
               icon: const Icon(Icons.logout),
               label: const Text('Se déconnecter'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (context) => _DeleteAccountDialog(
+                  hasPassword: user?.hasPassword ?? false,
+                ),
+              ),
+              icon: Icon(
+                Icons.delete_forever_outlined,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              label: Text(
+                'Supprimer mon compte',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -233,6 +257,118 @@ class SettingsScreen extends ConsumerWidget {
     if (confirmed == true) {
       await ref.read(authStateProvider.notifier).signOut();
     }
+  }
+}
+
+/// Dialogue de confirmation de suppression du compte (irréversible).
+/// Demande le mot de passe uniquement si le compte en a un ([hasPassword]) ;
+/// les comptes démo confirment directement. En cas de succès, le dialogue se
+/// ferme : l'état auth repasse en non authentifié et la redirection du
+/// routeur renvoie vers /auth/identifier.
+class _DeleteAccountDialog extends ConsumerStatefulWidget {
+  const _DeleteAccountDialog({required this.hasPassword});
+
+  final bool hasPassword;
+
+  @override
+  ConsumerState<_DeleteAccountDialog> createState() =>
+      _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
+  late final TextEditingController _passwordController;
+  String? _error;
+  bool _deleting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  bool get _canConfirm =>
+      !_deleting &&
+      (!widget.hasPassword || _passwordController.text.isNotEmpty);
+
+  Future<void> _delete() async {
+    if (_deleting) return;
+    setState(() {
+      _error = null;
+      _deleting = true;
+    });
+    final message = await ref.read(authStateProvider.notifier).deleteAccount(
+          password: widget.hasPassword ? _passwordController.text : null,
+        );
+    if (!mounted) return;
+    if (message == null) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() {
+        _deleting = false;
+        _error = message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('Supprimer définitivement ?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'Cette action est irréversible : votre compte, votre portefeuille, '
+            'votre liste de suivi, vos alertes et vos conversations seront '
+            'définitivement supprimés.',
+          ),
+          if (widget.hasPassword) ...<Widget>[
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('delete-account-password'),
+              controller: _passwordController,
+              obscureText: true,
+              enabled: !_deleting,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Mot de passe',
+                hintText: 'Confirmez avec votre mot de passe',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+          if (_error != null) FormError(message: _error!),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _deleting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.error,
+            foregroundColor: colors.onError,
+          ),
+          onPressed: _canConfirm ? _delete : null,
+          child: _deleting
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Supprimer définitivement'),
+        ),
+      ],
+    );
   }
 }
 

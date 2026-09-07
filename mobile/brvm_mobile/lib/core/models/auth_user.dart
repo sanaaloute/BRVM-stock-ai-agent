@@ -8,6 +8,7 @@ class AuthUser {
     this.email,
     this.phone,
     required this.hasTelegram,
+    this.hasPassword = false,
   });
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
@@ -15,12 +16,17 @@ class AuthUser {
         email: asString(json['email']),
         phone: asString(json['phone']),
         hasTelegram: asBool(json['has_telegram']),
+        hasPassword: asBool(json['has_password']),
       );
 
   final String id;
   final String? email;
   final String? phone;
   final bool hasTelegram;
+
+  /// `true` si le compte a un mot de passe (faux pour les comptes démo) :
+  /// la suppression de compte ne le demande que dans ce cas.
+  final bool hasPassword;
 
   /// Libellé d'affichage : e-mail ou téléphone selon ce qui existe.
   String get displayName => email ?? phone ?? 'Utilisateur';
@@ -30,6 +36,7 @@ class AuthUser {
         'email': email,
         'phone': phone,
         'has_telegram': hasTelegram,
+        'has_password': hasPassword,
       };
 }
 

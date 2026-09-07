@@ -144,22 +144,29 @@ final routerProvider = Provider<GoRouter>((ref) {
   final refresh = _AuthRefreshNotifier(ref);
   ref.onDispose(refresh.dispose);
   return GoRouter(
-    initialLocation: '/chat',
+    initialLocation: '/splash',
     refreshListenable: refresh,
     redirect: (context, state) {
       final auth = ref.read(authStateProvider);
       final location = state.matchedLocation;
       final onAuthRoute = location.startsWith('/auth');
-      if (auth is AuthLoading) return null;
+      final onSplash = location == '/splash';
+      // Pendant la restauration de la session : écran de chargement dédié
+      // (évite le flash de l'onglet chat avant la redirection).
+      if (auth is AuthLoading) return onSplash ? null : '/splash';
       if (auth is! AuthAuthenticated && !onAuthRoute) {
         return '/auth/identifier';
       }
-      if (auth is AuthAuthenticated && onAuthRoute) {
+      if (auth is AuthAuthenticated && (onAuthRoute || onSplash)) {
         return '/chat';
       }
       return null;
     },
     routes: <RouteBase>[
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
       GoRoute(
         path: '/auth/identifier',
         builder: (context, state) => const IdentifierScreen(),
@@ -335,6 +342,40 @@ class _KoraAppState extends ConsumerState<KoraApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       routerConfig: router,
+    );
+  }
+}
+
+
+/// Écran de démarrage affiché pendant la restauration de la session
+/// (état AuthLoading) : logo + indicateur de progression.
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.candlestick_chart,
+              size: 64,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Kora Bourse',
+              style: theme.textTheme.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
     );
   }
 }

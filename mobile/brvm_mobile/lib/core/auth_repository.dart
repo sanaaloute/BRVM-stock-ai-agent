@@ -115,6 +115,27 @@ class AuthRepository {
     return AuthUser.fromJson(asMap(response.data));
   }
 
+  /// Suppression définitive du compte (DELETE /mobile/v1/me). Le mot de
+  /// passe n'est requis que pour les comptes qui en ont un : 401 → mot de
+  /// passe incorrect/manquant. Les comptes démo (sans mot de passe)
+  /// appellent sans corps.
+  Future<void> deleteAccount({String? password}) async {
+    try {
+      await _api.delete(
+        '${AppConfig.apiPrefix}/me',
+        data: password == null
+            ? null
+            : <String, dynamic>{'password': password},
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw const AuthException('Mot de passe incorrect.');
+      }
+      final (message, _) = _parseDetail(e.response?.data);
+      throw AuthException(message ?? 'Erreur réseau. Vérifiez votre connexion.');
+    }
+  }
+
   /// Mode démo : session sans compte. N'existe que quand le backend tourne
   /// avec AUTH_PROVIDER=mock (sinon 403/503 → [AuthException]).
   Future<AuthSession> devLogin({String? identifier}) async {

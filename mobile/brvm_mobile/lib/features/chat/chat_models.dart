@@ -9,7 +9,7 @@ class ChatResponse {
     this.imageBase64,
     this.rawImagesBase64 = const <String>[],
     this.imageCaption,
-    this.clarification,
+    this.clarification = false,
     this.quotaRemaining,
     this.threadId,
     this.error,
@@ -20,7 +20,9 @@ class ChatResponse {
         imageBase64: asString(json['image_base64']),
         rawImagesBase64: asStringList(json['images_base64']),
         imageCaption: asString(json['image_caption']),
-        clarification: asString(json['clarification']),
+        // Booléen côté backend (app/api/chat.py) : le texte de clarification
+        // voyage dans `reply`, ce champ ne fait que marquer le type de tour.
+        clarification: asBool(json['clarification']),
         quotaRemaining: asInt(json['quota_remaining']),
         threadId: asString(json['thread_id']),
         error: asString(json['error']),
@@ -30,7 +32,7 @@ class ChatResponse {
   final String? imageBase64;
   final List<String> rawImagesBase64;
   final String? imageCaption;
-  final String? clarification;
+  final bool clarification;
   final int? quotaRemaining;
   final String? threadId;
   final String? error;
@@ -43,8 +45,8 @@ class ChatResponse {
         ...rawImagesBase64,
       ];
 
-  /// Texte à afficher (clarification prioritaire si pas de réponse).
-  String? get displayText => reply ?? clarification;
+  /// Texte à afficher (les clarifications arrivent aussi dans `reply`).
+  String? get displayText => reply;
 }
 
 /// Conversation existante (tel que renvoyé par GET /mobile/v1/conversations).

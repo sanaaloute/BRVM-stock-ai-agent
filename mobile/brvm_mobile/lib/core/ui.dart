@@ -198,11 +198,16 @@ class ErrorView extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     // Scrollable : le message d'erreur peut dépasser la hauteur disponible
     // sur de petits écrans (la vue vit dans une liste rafraîchissable).
+    // minHeight seulement quand la hauteur est bornée : dans une ListView
+    // (hauteur infinie) la vue s'ajuste à son contenu.
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          constraints: BoxConstraints(
+            minHeight:
+                constraints.hasBoundedHeight ? constraints.maxHeight : 0,
+          ),
           child: Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -250,11 +255,16 @@ class EmptyView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    // Même garde-fou qu'ErrorView : minHeight seulement si la hauteur est
+    // bornée (dans une ListView, la vue s'ajuste à son contenu).
     return LayoutBuilder(
       builder: (context, constraints) => SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          constraints: BoxConstraints(
+            minHeight:
+                constraints.hasBoundedHeight ? constraints.maxHeight : 0,
+          ),
           child: Center(
             child: Padding(
               padding: const EdgeInsets.all(24),

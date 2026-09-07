@@ -101,13 +101,21 @@ class PredictionInfo {
         trend: asString(json['trend']) ?? asString(json['tendance']),
         confidence: asDouble(json['confidence']),
         technicalConfig:
-            asString(json['technical_config']) ?? asString(json['config']),
+            _asTechnicalConfig(json['technical_config'] ?? json['config']),
       );
 
   final String? companyName;
   final String? trend;
   final double? confidence;
   final String? technicalConfig;
+}
+
+/// Le backend envoie `technical_config` comme liste de chaînes
+/// (app/scrapers/richbourse_prediction.py) ; tolère aussi une chaîne simple.
+String? _asTechnicalConfig(dynamic value) {
+  final items = asStringList(value);
+  if (items.isNotEmpty) return items.join('\n');
+  return asString(value);
 }
 
 /// Score & signal du jour (0-100 + BUY/SELL/HOLD).
