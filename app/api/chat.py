@@ -33,8 +33,25 @@ router = APIRouter()
 # Conversation memory: per-user threads are kept until /clear-memory is called
 # or they have been inactive for config.MEMORY_TTL_HOURS (0 = never auto-wipe).
 
-# Message appended to every bot reply so users know the content is AI-generated
+# Message appended to substantive bot replies so users know the content is
+# AI-generated. Greetings/chitchat (NLU intent "general") and clarification
+# questions carry no generated financial content, so they get no footer.
 SOURCE_FOOTER = "\n\n⚠️ Attention : ce texte est généré par IA. Vérifiez les informations avant toute décision ou action."
+
+
+def _needs_footer(result: dict, clarification: bool) -> bool:
+    """Decide whether the AI disclaimer footer applies to this turn.
+
+    Skipped for clarifications (the bot only asks a question back) and for
+    chitchat classified as intent "general" by the NLU. When the intent is
+    unknown (no structured_data), keep the footer — safe default.
+    """
+    if clarification:
+        return False
+    data = result.get("structured_data")
+    if isinstance(data, dict) and (data.get("intent") or "").strip().lower() == "general":
+        return False
+    return True
 
 
 if not config.API_SECRET_KEY:
@@ -354,7 +371,9 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
         clarification = result.get("clarification")
         if clarification:
             reply = redact_for_telegram(clarification)
-            return ChatResponse(reply=reply + SOURCE_FOOTER, clarification=True)
+            if _needs_footer(result, clarification=True):
+                reply += SOURCE_FOOTER
+            return ChatResponse(reply=reply, clarification=True)
 
         raw_reply = result.get("_fresh_reply")
         if raw_reply is None:
@@ -364,7 +383,8 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
             logger.warning("No fresh reply produced for thread %s", req.thread_id)
             return ChatError(error="Une erreur s'est produite. Veuillez réessayer.")
         reply = redact_for_telegram(raw_reply)
-        reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
+        if _needs_footer(result, clarification=False):
+            reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
 
         image_paths = result.get("image_paths") or []
         if not image_paths and result.get("image_path"):

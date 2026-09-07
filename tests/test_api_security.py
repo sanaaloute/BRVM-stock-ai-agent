@@ -5,6 +5,7 @@ Run:
     .venv/Scripts/python tests/test_api_security.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,8 +18,13 @@ import config  # noqa: E402
 config.DATABASE_URL = ""  # force SQLite regardless of local .env
 
 import app.api.chat as chat_mod  # noqa: E402
+from app.utils import user_db  # noqa: E402
 
 SECRET = "test-secret-123"
+
+# Throwaway usage DB: the repo dev DB may be locked by a running server.
+_tmp_db = Path(tempfile.mkdtemp()) / "security_test.db"
+user_db.DB_PATH = _tmp_db
 
 
 def _fake_run_agent(query, model=None, thread_id=None, telegram_user_id=None, checkpointer=None):
@@ -39,11 +45,14 @@ def _pin_fake_agent():
     """Under pytest, each test gets THIS module's fake agent regardless of the
     import/run order (other test modules patch chat_mod.run_agent too)."""
     old = chat_mod.run_agent
+    old_db_path = user_db.DB_PATH
     chat_mod.run_agent = _fake_run_agent
+    user_db.DB_PATH = _tmp_db
     try:
         yield
     finally:
         chat_mod.run_agent = old
+        user_db.DB_PATH = old_db_path
 
 
 def _post(query="price of NTLC?", key=None, user=42):
