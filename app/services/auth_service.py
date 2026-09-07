@@ -361,7 +361,7 @@ def authenticate_access_token(token: str) -> dict[str, Any] | None:
 
 # --- Password auth (scrypt, stdlib) -------------------------------------------
 
-PASSWORD_MIN_LENGTH = 8
+PASSWORD_MIN_LENGTH = config.PASSWORD_MIN_LENGTH
 
 _SCRYPT_N = 2 ** 14
 

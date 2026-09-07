@@ -382,6 +382,10 @@ JWT_REFRESH_TTL_SECONDS = int(os.getenv("JWT_REFRESH_TTL_SECONDS", str(30 * 24 *
 
 AUTH_PROVIDER = os.getenv("AUTH_PROVIDER", "smtp").strip().lower() or "smtp"
 
+# Minimum password length for mobile accounts (email/phone + password).
+# Any character mix is accepted (letters, digits, symbols — no case rules).
+PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "6").strip() or "6")
+
 OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "600").strip() or "600")
 
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5").strip() or "5")

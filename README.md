@@ -6,7 +6,7 @@ Scrape and query BRVM (Bourse Régionale des Valeurs Mobilières) / West African
 
 ## Mobile platform — Kora Bourse
 
-The same engine powers **Kora Bourse**, a Flutter mobile app (Android + iOS) for regional investors: AI advisor chat ("Kora") with persistent conversation history, live market palmares with search/filters, rich stock detail (price chart, fundamentals, dividends, news, technical prediction), portfolio buy-lots with weighted-average positions, price alerts, daily digest and SGI broker profiles — all over an authenticated REST API (`/mobile/v1/*`: OTP auth with JWT sessions, per-user quota, market snapshots served from the local DB with a scheduled post-close refresh). Source in [`mobile/`](mobile/README.md); app identity `com.neobytech.korabourse`. No Firebase dependency; push is pluggable via `PushService`.
+The same engine powers **Kora Bourse**, a Flutter mobile app (Android + iOS) for regional investors: AI advisor chat ("Kora") with persistent conversation history, live market palmares with search/filters, rich stock detail (price chart, fundamentals, dividends, news, technical prediction), portfolio buy-lots with weighted-average positions, price alerts, daily digest and SGI broker profiles — all over an authenticated REST API (`/mobile/v1/*`: email-or-phone + password auth with JWT sessions, per-user quota, market snapshots served from the local DB with a scheduled post-close refresh). Source in [`mobile/`](mobile/README.md); app identity `com.neobytech.korabourse`. No Firebase dependency; push is pluggable via `PushService`.
 
 ## Project tree
 
@@ -44,7 +44,7 @@ RealTimeStock/
 │   │   ├── digest.py        # Scheduled digest composition + job body
 │   │   ├── market_data.py   # Daily post-close market snapshots + scheduled refresh
 │   │   ├── sgi_service.py   # SGI broker profiles (local DB list/detail)
-│   │   ├── auth_service.py  # Mobile OTP auth, JWT sessions, app-user identity
+│   │   ├── auth_service.py  # Mobile auth: email/phone + password (scrypt), OTP codes, JWT sessions, app-user identity
 │   │   ├── otp_delivery.py  # OTP via SMTP / SMS provider / mock
 │   │   ├── push.py          # FCM push (env-gated; disabled without credentials)
 │   │   └── notify.py        # Channel-agnostic user notification dispatch

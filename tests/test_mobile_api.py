@@ -156,6 +156,29 @@ def test_password_register_and_login():
     assert r.json()["user"]["phone"] == "+2250712345678"
 
 
+def test_password_min_length_is_six():
+    # exactly 6 chars, letters+digits
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "sixchars@example.com", "password": "abc123",
+    })
+    assert r.status_code == 200, r.text
+    # exactly 6 digits (simple-digit passwords are allowed)
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "+2250799990001", "password": "123456",
+    })
+    assert r.status_code == 200, r.text
+    # login works with the 6-digit password
+    r = client.post("/mobile/v1/auth/login", json={
+        "identifier": "+2250799990001", "password": "123456",
+    })
+    assert r.status_code == 200, r.text
+    # 5 chars → too weak
+    r = client.post("/mobile/v1/auth/register", json={
+        "identifier": "fivechars@example.com", "password": "abc12",
+    })
+    assert r.status_code == 400
+
+
 def test_dev_login_only_in_mock_mode():
     config.AUTH_PROVIDER = "mock"
     r = client.post("/mobile/v1/auth/dev-login", json={"identifier": "demo-device@example.com"})

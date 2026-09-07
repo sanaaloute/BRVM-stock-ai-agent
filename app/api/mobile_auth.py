@@ -129,8 +129,9 @@ class PasswordAuthBody(BaseModel):
 
 @router.post("/register")
 def register(body: PasswordAuthBody, request: Request) -> dict[str, Any]:
-    """Local account creation: email or phone + password. No OTP/SMTP yet —
-    verification can be layered on later without changing this contract."""
+    """Local account creation: email or phone + password. The account is
+    unverified until an OTP is verified for the same identifier — that can be
+    layered on later without changing this contract."""
     _require_auth_enabled()
     client = request.client.host if request.client else "unknown"
     if _auth_throttled(f"{client}:{body.identifier}"):
