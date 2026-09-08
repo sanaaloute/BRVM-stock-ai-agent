@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Use Playwright Python image (includes Chromium and system deps; match version to requirements)
 ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/python:v1.49.0-noble
 FROM ${PLAYWRIGHT_IMAGE} AS base
@@ -5,9 +6,13 @@ FROM ${PLAYWRIGHT_IMAGE} AS base
 WORKDIR /app
 
 # Install Python deps (playwright + Chromium already in base image; use requirements-docker to avoid greenlet conflict)
+# uv instead of pip: parallel downloads + much faster resolver. The cache mount
+# keeps uv's download/build cache across builds (not persisted into the image),
+# so rebuilds after editing requirements-docker.txt no longer reinstall from zero.
 COPY requirements-docker.txt .
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements-docker.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    pip install --no-cache-dir uv \
+    && uv pip install --system -r requirements-docker.txt
 
 # App and data
 COPY config.py .

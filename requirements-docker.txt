@@ -30,6 +30,10 @@ certifi==2026.2.25
 
 # Telegram bot (job-queue for price target alerts)
 python-telegram-bot[job-queue]==22.8
+# Mobile auth: PyJWT is imported at API boot (app/services/auth_service.py).
+# firebase-admin / twilio stay in requirements.txt only: they load lazily and
+# are needed here only if FIREBASE_CREDENTIALS / SMS_PROVIDER=twilio get set.
+PyJWT==2.10.1
 # Voice to text: local whisper (primary); Google Speech fallback needs ffmpeg for ogg/mp3
 faster-whisper==1.2.1
 SpeechRecognition==3.17.0
