@@ -3,6 +3,11 @@
 Served at GET /privacy on the API — reachable through the gateway at
 https://kbourse.neobytech.net/privacy. Static HTML, French (the app's
 language), no tracking, no auth.
+
+In production this path is intercepted at the Cloudflare edge by the worker
+in cloudflare/privacy-page/worker.js (the tunnel/origin is intermittently
+unreachable, which got the URL rejected by Google Play). This route remains
+as origin fallback and content source of truth — keep the two in sync.
 """
 from __future__ import annotations
 

@@ -1,0 +1,13 @@
+name = "kora-privacy-page"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Path-scoped routes: intercept ONLY the privacy page at the edge so it no
+# longer depends on the Cloudflare Tunnel (kbourse.neobytech.net → local API,
+# intermittently unreachable → Google Play rejected the privacy URL). All
+# other paths on the host keep flowing to the tunnel. zone_name is required
+# because these are path patterns, not custom domains.
+routes = [
+  { pattern = "kbourse.neobytech.net/privacy", zone_name = "neobytech.net" },
+  { pattern = "kbourse.neobytech.net/privacy/", zone_name = "neobytech.net" },
+]
