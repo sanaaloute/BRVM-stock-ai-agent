@@ -1,6 +1,6 @@
 # `docker compose up -d` starts the full stack: PostgreSQL + Chat API + Telegram bot
-# + Evolution API (self-hosted WhatsApp gateway). The LLM runs on Ollama Cloud
-# (OLLAMA_CLOUD=true); no Ollama container is included.
+# + Evolution API (self-hosted WhatsApp gateway). The LLM uses the host's local
+# Ollama installation; no Ollama container is included.
 # (+ SGI broker data auto-bootstrapped into the shared volume by the image
 # entrypoint — no manual `python -m scripts.run_sgi_fetch` step; refreshed when older than
 # 7 days, tunable via SGI_REFRESH_DAYS).
@@ -51,9 +51,15 @@ services:
       # service and the published port can reach it. Host-side exposure is
       # limited by the ports mapping below (default 127.0.0.1).
       - API_BIND=0.0.0.0
+      - LLM_LOCAL_ONLY=${LLM_LOCAL_ONLY:-true}
+      - OLLAMA_LOCAL_MODEL=${OLLAMA_LOCAL_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
+      - OLLAMA_LOCAL_BASE_URL=${OLLAMA_LOCAL_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_LOCAL_REASONING=${OLLAMA_LOCAL_REASONING:-}
       # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
       # must match the market. Override TZ in .env.
       - TZ=${TZ:-Africa/Abidjan}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # Localhost-only by default: the API can run unauthenticated in dev mode.
       # Set API_BIND=0.0.0.0 in .env ONLY when the Meta WhatsApp webhook needs
@@ -87,9 +93,15 @@ services:
     environment:
       - BRVM_API_URL=http://api:8000
       - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
+      - LLM_LOCAL_ONLY=${LLM_LOCAL_ONLY:-true}
+      - OLLAMA_LOCAL_MODEL=${OLLAMA_LOCAL_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
+      - OLLAMA_LOCAL_BASE_URL=${OLLAMA_LOCAL_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_LOCAL_REASONING=${OLLAMA_LOCAL_REASONING:-}
       # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
       # must match the market. Override TZ in .env.
       - TZ=${TZ:-Africa/Abidjan}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - bot_data:/app/app/data
     depends_on:

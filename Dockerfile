@@ -1,65 +1,49 @@
 # syntax=docker/dockerfile:1
-# Use Playwright Python image (includes Chromium and system deps; match version to requirements)
 ARG PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/python:v1.49.0-noble
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.5
+FROM ${UV_IMAGE} AS uv
 FROM ${PLAYWRIGHT_IMAGE} AS base
 
 WORKDIR /app
+COPY --from=uv /uv /uvx /usr/local/bin/
 
-# Install Python deps (playwright + Chromium already in base image; use requirements-docker to avoid greenlet conflict)
-# uv instead of pip: parallel downloads + much faster resolver. The cache mount
-# keeps uv's download/build cache across builds (not persisted into the image),
-# so rebuilds after editing requirements-docker.txt no longer reinstall from zero.
-COPY requirements-docker.txt .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    pip install --no-cache-dir uv \
-    && uv pip install --system -r requirements-docker.txt
+ARG TARGETOS
+ARG TARGETARCH
+RUN test "${TARGETOS}" = "linux" \
+    && test "${TARGETARCH}" = "$(dpkg --print-architecture)" \
+    && echo "Verified build target and userland: ${TARGETOS}/${TARGETARCH}"
 
-# App and data
-COPY config.py .
-COPY scripts ./scripts
-COPY alembic.ini ./
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
-COPY app app/
-
-# Persisted at runtime via volume; ensure dir exists
-RUN mkdir -p /app/app/data/series
-
-# ffmpeg is required to convert Telegram/WhatsApp voice notes (OGG/OPUS) to WAV
-# for the Google Speech fallback (pydub shells out to ffmpeg/ffprobe).
+# System dependencies and the Python environment change less often than the app,
+# so keep their layers ahead of the application source for code-only rebuilds.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Pre-download the whisper model (voice-to-text) so the first voice note is fast
-# and the container needs no Hugging Face access at runtime. Bakes ~250MB (small,
-# int8) into the image. HF_HOME pins the Hugging Face cache under /app so the
-# baked model lands in the tree owned by the runtime user (see below) and is
-# found again at runtime. Override with: docker compose build --build-arg WHISPER_MODEL=base
+COPY requirements-docker.txt .
+ARG UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --default-index "${UV_DEFAULT_INDEX}" -r requirements-docker.txt
+
 ARG WHISPER_MODEL=small
 ENV WHISPER_MODEL=${WHISPER_MODEL}
 ENV HF_HOME=/app/.cache/huggingface
-# huggingface.co is unreachable from some networks (the model bake fails with
-# ConnectError). hf-mirror.com mirrors the Hub; HF_HUB_DISABLE_XET forces the
-# plain-LFS path because the xet CAS backend (cas-server.xethub.hf.co) bypasses
-# HF_ENDPOINT. On a network that reaches HF directly, override at runtime with
-# HF_ENDPOINT=https://huggingface.co (container env beats image ENV).
 ENV HF_ENDPOINT=https://hf-mirror.com
 ENV HF_HUB_DISABLE_XET=1
-RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
-
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Run as an unprivileged user. chown the whole /app tree so the code stays
-# readable and the runtime-writable paths belong to it: /app/app/data (the
-# bot_data volume mount point — named-volume copy-up inherits image ownership
-# on first mount) and the HF_HOME whisper cache. Playwright browsers stay at
-# /ms-playwright (base image default, already world read+execute).
 RUN useradd --create-home --shell /bin/bash bot \
+    && mkdir -p /app/app/data/series /app/.cache/huggingface \
     && chown -R bot:bot /app
 USER bot
 
-# Entrypoint bootstraps SGI (broker) data into the shared volume on startup.
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Bake the Whisper model into the image as the runtime user. This layer remains
+# valid when only application source changes.
+RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
 
-# Default: run Telegram bot. Override to run CLI agent: python -m scripts.run_agent "query"
+COPY --chown=bot:bot config.py .
+COPY --chown=bot:bot scripts ./scripts
+COPY --chown=bot:bot alembic.ini ./
+COPY --chown=bot:bot --chmod=755 entrypoint.sh .
+COPY --chown=bot:bot app app/
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-m", "scripts.run_telegram_bot"]

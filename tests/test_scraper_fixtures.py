@@ -105,6 +105,36 @@ def test_richbourse_variation_current_layout():
             assert 0.2 * s["cours_actuel"] * s["volume"] <= s["value_fcfa"] <= 5 * s["cours_actuel"] * s["volume"], s
 
 
+def test_richbourse_variation_short_headers():
+    """Layout of 2026-10: compact header labels SymboleSym. / VariationVar."""
+    import app.scrapers.richbourse as rb
+
+    html = """
+    <table class="table table-striped table-bordered t rb-var-table">
+      <tr><th></th><th>SymboleSym.</th><th>Action</th><th>VariationVar.</th>
+        <th>Cours actuel</th><th>Cours de la veille</th><th>Volume</th>
+        <th>Valeur (FCFA)</th><th>Valeur %</th><th>Capitalisation</th><th></th></tr>
+      <tr><td></td><td>ABJC</td><td>SERVAIR</td><td>-3,23 %</td>
+        <td>3 000</td><td>3 100</td><td>795</td><td>2 400 905</td>
+        <td>0,12 %</td><td>32 736 000 000</td><td></td></tr>
+      <tr><td></td><td>BBGC</td><td>BRIDGE BANK</td><td>-1,00 %</td>
+        <td>10 390</td><td>10 495</td><td>7 129</td><td>74 364 355</td>
+        <td>3,83 %</td><td>519 500 000 000</td><td></td></tr>
+    </table>
+    """
+    patch_get(rb, html)
+    out = rb.RichBourseScraper(period="veille", progression="tout", sleep_seconds=0).scrape()
+    stocks = out["stocks"]
+    assert [s["symbol"] for s in stocks] == ["ABJC", "BBGC"], stocks
+    abjc = stocks[0]
+    assert abjc["variation_pct"] == -3.23, abjc
+    assert abjc["cours_actuel"] == 3000, abjc
+    assert abjc["cours_veille"] == 3100, abjc
+    assert abjc["volume"] == 795, abjc
+    assert abjc["value_fcfa"] == 2400905, abjc
+    assert abjc["capitalisation"] == 32736000000, abjc
+
+
 def test_richbourse_variation_garbage_html():
     import app.scrapers.richbourse as rb
 
@@ -186,6 +216,8 @@ def test_fetch_error_returns_error_field():
 
 if __name__ == "__main__":
     check("test_richbourse_variation_table", test_richbourse_variation_table)
+    check("test_richbourse_variation_current_layout", test_richbourse_variation_current_layout)
+    check("test_richbourse_variation_short_headers", test_richbourse_variation_short_headers)
     check("test_richbourse_variation_garbage_html", test_richbourse_variation_garbage_html)
     check("test_richbourse_news_items", test_richbourse_news_items)
     check("test_brvm_announcements", test_brvm_announcements)

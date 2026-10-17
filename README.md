@@ -62,6 +62,7 @@ RealTimeStock/
 │   ├── run_migrations.py       # Apply Alembic migrations (native; the Docker entrypoint runs it too)
 │   ├── run_company_details_fetch.py  # Refresh Sika Finance company fiches (fundamentals cache)
 │   ├── dev-up.sh               # Dev quick-start (API + apps on emulators)
+│   ├── update_docker.sh        # Rebuild and restart services after code/.env changes
 │   └── backup.sh               # Production backups
 ├── tests/                # Offline test suites (see below)
 ├── requirements.txt
@@ -76,7 +77,9 @@ RealTimeStock/
 1. **Install dependencies**
 
    ```bash
-   pip install -r requirements.txt
+   uv venv
+   source .venv/bin/activate
+   uv pip install -r requirements.txt
    playwright install chromium
    ```
 
@@ -93,7 +96,7 @@ RealTimeStock/
    Edit `.env` and set at least:
 
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com)
-   - LLM provider: `LLM_PROVIDER=ollama|tokenfree|openrouter` + the matching key/model (Ollama local, Ollama Cloud, TokenFree, or OpenRouter — see `.env.example`). Optional ordered fallback chain on upstream outages: `LLM_FALLBACK_PROVIDERS=tokenfree,openrouter` (each fallback is tried once, in order, when the primary provider's upstream is down).
+   - Local LLM: local-only Ollama is the default (`LLM_LOCAL_ONLY=true`), using Qwen3-VL-8B. Select another installed model with `OLLAMA_LOCAL_MODEL` (GPT-OSS-20B, Nemotron-3-Nano-4B, Qwen2.5-3B, etc.). External providers and fallbacks are legacy options that require `LLM_LOCAL_ONLY=false` — see `.env.example`.
 
    For the Telegram bot:
 
@@ -158,7 +161,7 @@ RealTimeStock/
    - Unlike the Meta Cloud API, **no public HTTPS endpoint is needed**: Evolution connects *outbound* to WhatsApp, and the webhook travels `evolution → api` inside the compose network. On EC2 the security group only needs SSH (port 22).
    - Evolution's port `8080` is bound to `127.0.0.1` in the compose file. For the one-time admin steps (QR pairing, webhook setup), open an SSH tunnel from your machine and run the curls against it:
      `ssh -L 8080:localhost:8080 <user>@<host>` (on EC2: `ec2-user@<ec2-ip>`, or the Session Manager port-forwarding equivalent).
-   - On EC2, use an **x86_64 (amd64)** instance — `t3.medium` (4 GB) minimum; the LLM runs on Ollama Cloud, so no GPU or extra RAM for local models is needed.
+   - On EC2, use an **x86_64 (amd64)** instance with Ollama installed and the selected model pulled. Local models need sufficient RAM for the model plus the application; the old 4 GB cloud-based sizing no longer applies.
    - The api port `8000` is published on localhost by default (`API_BIND`, see *Production hardening* below); keep the security group closed on it unless you also use the Meta webhook or external health checks (the Evolution channel does not need it).
 
 4. **Tuning (optional, see `.env.example`)**
@@ -209,12 +212,31 @@ RealTimeStock/
    docker compose up -d
    ```
 
+   After later code or `.env` changes, rebuild the application images and recreate
+   the affected containers without deleting named volumes:
+
+   ```bash
+   bash scripts/update_docker.sh
+   ```
+
+   The update script selects the Docker daemon's native platform (`linux/arm64`
+   on Apple Silicon, `linux/amd64` on x86_64), verifies the application image,
+   and only then recreates containers. Python packages are installed with `uv`;
+   FFmpeg, dependencies, and the Whisper model remain cached for code-only rebuilds.
+   The build uses the Aliyun package index by default; set `UV_DEFAULT_INDEX` to
+   override it, for example:
+
+   ```bash
+   UV_DEFAULT_INDEX=https://pypi.org/simple bash scripts/update_docker.sh
+   ```
+
    Services: `db` (PostgreSQL 16, data in the `postgres_data` volume), `api` (with
    a `/health` healthcheck), `bot` (waits for the api + db healthchecks), `evolution`
    (self-hosted WhatsApp gateway on port 8080 — see the Evolution section above for
    the one-time QR pairing + webhook setup; if you don't use WhatsApp, comment out
-   the `evolution` service AND its `depends_on` entry under `api`). The LLM runs on
-   Ollama Cloud (`OLLAMA_CLOUD=true`) — no Ollama container is included in the stack.
+   the `evolution` service AND its `depends_on` entry under `api`). The LLM uses
+   the host's local Ollama at `host.docker.internal:11434`; no Ollama container is
+   included. Install the selected model on the host before starting the stack.
    To run on SQLite,
    remove `DATABASE_URL` from the compose services — the `bot_data` volume then
    holds the .db files.
@@ -341,7 +363,8 @@ Notes:
 - **Groq is not a supported provider**: api.groq.com rejects requests from some
   regions (e.g. mainland China) with `403 Forbidden` before even checking the
   API key — verified unfixable even through a Cloudflare worker (in-region edge
-  egress inherits the block). Use OpenRouter and/or Ollama Cloud, which both work.
+  egress inherits the block). The default local-only Ollama setup avoids external
+  LLM provider connectivity entirely.
 - WhatsApp note: the Evolution gateway and Meta's `graph.facebook.com` are also
   unreachable from mainland China. The Meta channel's inbound webhooks can
   arrive through your existing Cloudflare setup (tunnel), but outbound sends

@@ -116,7 +116,14 @@ def _build_column_map(texts: list[str]) -> dict[str, int] | None:
     """Map canonical row keys to cell indices from a header row; None if no header."""
     colmap: dict[str, int] = {}
     for i, raw in enumerate(texts):
-        key = _HEADER_ALIASES.get(re.sub(r"\s+", " ", (raw or "").strip().lower()))
+        normalized = re.sub(r"\s+", " ", (raw or "").strip().lower())
+        key = _HEADER_ALIASES.get(normalized)
+        if key is None and normalized.startswith("symbole"):
+            key = _HEADER_ALIASES["symbole"]
+        if key is None and normalized.startswith("variation"):
+            key = _HEADER_ALIASES["variation"]
+        if key is None:
+            key = _HEADER_ALIASES.get(normalized.split(" ", 1)[0])
         if key and key not in colmap:
             colmap[key] = i
     return colmap or None

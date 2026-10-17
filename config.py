@@ -208,7 +208,12 @@ else:
 
 
 
-# LLM provider: ollama | openrouter
+# Local Ollama is the default. Set LLM_LOCAL_ONLY=false to restore the legacy
+# external provider, Ollama Cloud, and fallback-provider behavior.
+LLM_LOCAL_ONLY = os.getenv("LLM_LOCAL_ONLY", "true").strip().lower() in ("1", "true", "yes")
+DEFAULT_OLLAMA_LOCAL_MODEL = "modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"
+
+# Legacy provider selection (used only when LLM_LOCAL_ONLY=false).
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower() or "ollama"
 
@@ -260,7 +265,7 @@ OLLAMA_CLOUD_MODEL = os.getenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b").strip() or 
 
 # Local-only model tag. Ignored when OLLAMA_CLOUD=true (OLLAMA_CLOUD_MODEL wins).
 
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b").strip() or "llama3.2:3b"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_LOCAL_MODEL).strip() or DEFAULT_OLLAMA_LOCAL_MODEL
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip() or None
 
@@ -277,6 +282,15 @@ OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "2m").strip() or "2m"
 # goes to a separate channel, keeping the answer itself clean.
 
 OLLAMA_REASONING = os.getenv("OLLAMA_REASONING", "").strip().lower()
+
+if LLM_LOCAL_ONLY:
+    LLM_PROVIDER = "ollama"
+    LLM_FALLBACK_PROVIDERS = ""
+    LLM_FALLBACK_PROVIDER = ""
+    OLLAMA_CLOUD = False
+    OLLAMA_MODEL = os.getenv("OLLAMA_LOCAL_MODEL", DEFAULT_OLLAMA_LOCAL_MODEL).strip() or DEFAULT_OLLAMA_LOCAL_MODEL
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_LOCAL_BASE_URL", "").strip() or None
+    OLLAMA_REASONING = os.getenv("OLLAMA_LOCAL_REASONING", "").strip().lower()
 
 
 
