@@ -9,24 +9,25 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _FakePortfolioRepository extends PortfolioRepository {
   _FakePortfolioRepository()
-      : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
+    : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   int calls = 0;
 
   @override
-  Future<PortfolioData> get() async {
+  Future<PortfolioData> get({String? sgi}) async {
     calls++;
     return PortfolioData.fromJson(<String, dynamic>{
       'positions': <Map<String, dynamic>>[
         <String, dynamic>{'symbol': 'ETIT'},
       ],
+      'sgi_breakdown': <Map<String, dynamic>>[],
     });
   }
 }
 
 class _FakeAlertsRepository extends AlertsRepository {
   _FakeAlertsRepository()
-      : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
+    : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   int calls = 0;
 

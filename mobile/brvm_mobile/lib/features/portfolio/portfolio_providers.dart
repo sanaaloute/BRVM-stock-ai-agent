@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,9 +15,65 @@ class PortfolioRepository {
 
   final ApiClient _api;
 
-  Future<PortfolioData> get() async {
-    final response = await _api.get('${AppConfig.apiPrefix}/portfolio');
+  Future<PortfolioData> get({String? sgi}) async {
+    final response = await _api.get(
+      '${AppConfig.apiPrefix}/portfolio',
+      queryParameters: sgi == null ? null : <String, dynamic>{'sgi': sgi},
+    );
     return PortfolioData.fromJson(asMap(response.data));
+  }
+
+  Future<SgiImportPreview> parseImport(Uint8List bytes, String filename) async {
+    try {
+      final formData = FormData.fromMap({
+        'file': MultipartFile.fromBytes(bytes, filename: filename),
+      });
+      final response = await _api.post(
+        '${AppConfig.apiPrefix}/portfolio/import/parse',
+        data: formData,
+      );
+      return SgiImportPreview.fromJson(asMap(response.data));
+    } on DioException catch (e) {
+      throw StateError(
+        dioDetailMessage(e) ?? 'Impossible d’analyser ce document.',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> confirmImport(
+    String contentHash,
+    List<SgiTransaction> transactions,
+  ) async {
+    try {
+      final response = await _api.post(
+        '${AppConfig.apiPrefix}/portfolio/import/confirm',
+        data: <String, dynamic>{
+          'content_hash': contentHash,
+          'transactions': transactions.map((tx) => tx.toJson()).toList(),
+        },
+      );
+      return asMap(response.data);
+    } on DioException catch (e) {
+      throw StateError(
+        dioDetailMessage(e) ?? 'Impossible d’appliquer ce document.',
+      );
+    }
+  }
+
+  Future<List<PortfolioHistoryPoint>> getHistory(
+    int days, {
+    String? sgi,
+  }) async {
+    final response = await _api.get(
+      '${AppConfig.apiPrefix}/portfolio/history',
+      queryParameters: <String, dynamic>{
+        'days': days,
+        if (sgi != null) ...{'sgi': sgi},
+      },
+    );
+    return asMapList(
+      asMap(response.data)['points'],
+    ).map(PortfolioHistoryPoint.fromJson).toList();
   }
 
   /// Ajoute un lot d'achat (chaque POST crée une nouvelle ligne).
@@ -24,8 +82,9 @@ class PortfolioRepository {
     String symbol,
     double buyPrice,
     String buyDate,
-    double quantity,
-  ) async {
+    double quantity, {
+    String? sgi,
+  }) async {
     try {
       await _api.post(
         '${AppConfig.apiPrefix}/portfolio',
@@ -34,6 +93,7 @@ class PortfolioRepository {
           'buy_price': buyPrice,
           'buy_date': buyDate,
           'quantity': quantity,
+          if (sgi != null) ...{'sgi': sgi},
         },
       );
       return null;
@@ -49,6 +109,7 @@ class PortfolioRepository {
     double? buyPrice,
     String? buyDate,
     double? quantity,
+    String? sgi,
   }) async {
     try {
       await _api.put(
@@ -57,6 +118,7 @@ class PortfolioRepository {
           'buy_price': ?buyPrice,
           'buy_date': ?buyDate,
           'quantity': ?quantity,
+          if (sgi != null) ...{'sgi': sgi},
         },
       );
       return null;
@@ -80,26 +142,28 @@ final portfolioRepositoryProvider = Provider<PortfolioRepository>(
 
 final portfolioProvider =
     AsyncNotifierProvider<PortfolioNotifier, PortfolioData>(
-  PortfolioNotifier.new,
-);
+      PortfolioNotifier.new,
+    );
 
 class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
   @override
   Future<PortfolioData> build() {
-    // Changement de compte → rechargement automatique (pas de cache croisé).
+    // Changement de compte ou de SGI → rechargement automatique.
     ref.watch(currentUserIdProvider);
-    return ref.watch(portfolioRepositoryProvider).get();
+    final sgi = ref.watch(portfolioSgiFilterProvider);
+    return ref.watch(portfolioRepositoryProvider).get(sgi: sgi);
   }
 
   Future<String?> addLot(
     String symbol,
     double buyPrice,
     String buyDate,
-    double quantity,
-  ) async {
+    double quantity, {
+    String? sgi,
+  }) async {
     final message = await ref
         .read(portfolioRepositoryProvider)
-        .addLot(symbol, buyPrice, buyDate, quantity);
+        .addLot(symbol, buyPrice, buyDate, quantity, sgi: sgi);
     ref.invalidateSelf();
     return message;
   }
@@ -109,12 +173,16 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     double? buyPrice,
     String? buyDate,
     double? quantity,
+    String? sgi,
   }) async {
-    final message = await ref.read(portfolioRepositoryProvider).updateLot(
+    final message = await ref
+        .read(portfolioRepositoryProvider)
+        .updateLot(
           lotId,
           buyPrice: buyPrice,
           buyDate: buyDate,
           quantity: quantity,
+          sgi: sgi,
         );
     ref.invalidateSelf();
     return message;
@@ -136,3 +204,15 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     }
   }
 }
+
+typedef PortfolioHistoryQuery = ({int days, String? sgi});
+
+final portfolioSgiFilterProvider = StateProvider<String?>((ref) => null);
+
+final portfolioHistoryProvider = FutureProvider.autoDispose
+    .family<List<PortfolioHistoryPoint>, PortfolioHistoryQuery>((ref, query) {
+      ref.watch(currentUserIdProvider);
+      return ref
+          .watch(portfolioRepositoryProvider)
+          .getHistory(query.days, sgi: query.sgi);
+    });

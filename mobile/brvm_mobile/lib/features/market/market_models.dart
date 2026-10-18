@@ -13,14 +13,15 @@ class PalmaresStock {
   });
 
   factory PalmaresStock.fromJson(Map<String, dynamic> json) => PalmaresStock(
-        symbol: asString(json['symbol']) ?? asString(json['symbole']) ?? '',
-        name: asString(json['name']) ?? asString(json['nom']),
-        coursActuel: asDouble(json['cours_actuel']),
-        coursVeille: asDouble(json['cours_veille']),
-        variationPct: asDouble(json['variation_pct']) ?? asDouble(json['variation']),
-        volume: asDouble(json['volume']),
-        capitalisation: asDouble(json['capitalisation']),
-      );
+    symbol: asString(json['symbol']) ?? asString(json['symbole']) ?? '',
+    name: asString(json['name']) ?? asString(json['nom']),
+    coursActuel: asDouble(json['cours_actuel']),
+    coursVeille: asDouble(json['cours_veille']),
+    variationPct:
+        asDouble(json['variation_pct']) ?? asDouble(json['variation']),
+    volume: asDouble(json['volume']),
+    capitalisation: asDouble(json['capitalisation']),
+  );
 
   final String symbol;
   final String? name;
@@ -37,7 +38,9 @@ class PalmaresStock {
 List<BrokerEntry> brokerEntriesFromSection(dynamic raw) {
   final items = raw is List
       ? asMapList(raw)
-      : asMapList(asMap(raw)['items'] ?? asMap(raw)['sgi'] ?? asMap(raw)['brokers']);
+      : asMapList(
+          asMap(raw)['items'] ?? asMap(raw)['sgi'] ?? asMap(raw)['brokers'],
+        );
   return items.map(BrokerEntry.fromJson).toList();
 }
 
@@ -87,21 +90,36 @@ class BrokerEntry {
       raw: json,
       id: asInt(json['id']),
       name: firstOf(const <String>[
-        'name', 'nom', 'title', 'raison_sociale', 'denomination',
+        'name',
+        'nom',
+        'title',
+        'raison_sociale',
+        'denomination',
       ]),
       country: firstOf(const <String>['country', 'pays']),
       countryCode: firstOf(const <String>['country_code', 'pays_code']),
       phone: firstOf(const <String>[
-        'phone', 'telephone', 'tel', 'contact', 'gsm',
+        'phone',
+        'telephone',
+        'tel',
+        'contact',
+        'gsm',
       ]),
       url: firstOf(const <String>[
-        'url', 'website', 'site', 'site_web', 'link', 'lien',
+        'url',
+        'website',
+        'site',
+        'site_web',
+        'link',
+        'lien',
       ]),
       email: firstOf(const <String>['email', 'e-mail', 'courriel', 'mail']),
       address: firstOf(const <String>['address', 'adresse', 'siege']),
       minAmount: firstOf(const <String>['min_amount', 'montant_minimum']),
       note: firstOf(const <String>['note', 'remarque']),
-      otherCountries: countriesOf(json['other_countries'] ?? json['autres_pays']),
+      otherCountries: countriesOf(
+        json['other_countries'] ?? json['autres_pays'],
+      ),
       info: firstOf(const <String>['info', 'description']),
       detailText: firstOf(const <String>['detail_text', 'texte_detail']),
     );
@@ -121,6 +139,58 @@ class BrokerEntry {
   final List<String> otherCountries;
   final String? info;
   final String? detailText;
+
+  String get fullName {
+    final value = (name ?? '').trim();
+    return value.replaceFirst(RegExp(r'\s*\([^()]+\)\s*$'), '').trim();
+  }
+
+  String get sigle {
+    final provided = asString(
+      raw['sigle'] ?? raw['acronym'] ?? raw['abbreviation'],
+    );
+    if (provided != null && provided.trim().isNotEmpty) {
+      return provided.trim();
+    }
+    final value = (name ?? '').trim();
+    final explicit = RegExp(r'\(([^()]+)\)\s*$').firstMatch(value);
+    if (explicit != null) return explicit.group(1)!.trim();
+    return _deriveSigle(fullName);
+  }
+
+  static String _deriveSigle(String value) {
+    const ignored = <String>{
+      'DE',
+      'DES',
+      'DU',
+      'ET',
+      'AND',
+      'FOR',
+      'OF',
+      'THE',
+      'D',
+      'L',
+      'LA',
+      'LE',
+      'LES',
+      'SGI',
+      'SA',
+      'SARL',
+      'SAS',
+      'CIE',
+    };
+    final words = value
+        .replaceAll(RegExp(r'[^A-Za-zÀ-ÖØ-öø-ÿ0-9]+'), ' ')
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where(
+          (word) => word.isNotEmpty && !ignored.contains(word.toUpperCase()),
+        )
+        .toList();
+    if (words.isEmpty) return value.trim();
+    if (words.length <= 2) return words.first.toUpperCase();
+    return words.map((word) => word[0]).join().toUpperCase();
+  }
 }
 
 /// Actualité boursière.
@@ -149,7 +219,12 @@ class NewsItem {
       date: firstOf(const <String>['date', 'published_at', 'pubdate']),
       source: firstOf(const <String>['source', 'origine']),
       summary: firstOf(const <String>[
-        'snippet', 'summary', 'description', 'resume', 'résumé', 'excerpt',
+        'snippet',
+        'summary',
+        'description',
+        'resume',
+        'résumé',
+        'excerpt',
       ]),
       url: firstOf(const <String>['url', 'link', 'lien']),
     );
@@ -166,19 +241,13 @@ class NewsItem {
 /// Flux d'actualités : items + avertissement éventuel (source de repli)
 /// + erreur de section (les items peuvent être présents malgré tout).
 class NewsFeed {
-  const NewsFeed({
-    this.items = const <NewsItem>[],
-    this.warning,
-    this.error,
-  });
+  const NewsFeed({this.items = const <NewsItem>[], this.warning, this.error});
 
   /// Accepte les deux formes : liste directe ou
   /// `{"items": [...], "warning": ..., "error": ...}`.
   factory NewsFeed.fromSection(dynamic raw) {
     if (raw is List) {
-      return NewsFeed(
-        items: asMapList(raw).map(NewsItem.fromJson).toList(),
-      );
+      return NewsFeed(items: asMapList(raw).map(NewsItem.fromJson).toList());
     }
     final map = asMap(raw);
     return NewsFeed(
@@ -198,11 +267,11 @@ class NewsArticle {
   const NewsArticle({this.title, this.date, this.url, this.text});
 
   factory NewsArticle.fromJson(Map<String, dynamic> json) => NewsArticle(
-        title: asString(json['title']),
-        date: asString(json['date']),
-        url: asString(json['url']),
-        text: asString(json['text']),
-      );
+    title: asString(json['title']),
+    date: asString(json['date']),
+    url: asString(json['url']),
+    text: asString(json['text']),
+  );
 
   final String? title;
   final String? date;

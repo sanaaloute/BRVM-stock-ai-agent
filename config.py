@@ -208,89 +208,31 @@ else:
 
 
 
-# Local Ollama is the default. Set LLM_LOCAL_ONLY=false to restore the legacy
-# external provider, Ollama Cloud, and fallback-provider behavior.
-LLM_LOCAL_ONLY = os.getenv("LLM_LOCAL_ONLY", "true").strip().lower() in ("1", "true", "yes")
-DEFAULT_OLLAMA_LOCAL_MODEL = "modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"
+# Local Ollama is the only LLM backend used by the app.
+LLM_PROVIDER = "ollama"
+LLM_FALLBACK_PROVIDERS = ""
+LLM_FALLBACK_PROVIDER = ""
+DEFAULT_OLLAMA_MODEL = "modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"
 
-# Legacy provider selection (used only when LLM_LOCAL_ONLY=false).
-
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").strip().lower() or "ollama"
-
-
-
-# Fallback providers tried in order when the primary's upstream is down
-
-# (502/overload/connection). Ordered, comma-separated. E.g. with
-
-# LLM_PROVIDER=ollama: LLM_FALLBACK_PROVIDERS=tokenfree,openrouter
-
-LLM_FALLBACK_PROVIDERS = os.getenv("LLM_FALLBACK_PROVIDERS", "").strip().lower()
-
-# Legacy single-fallback knob (merged into the chain if set).
-
-LLM_FALLBACK_PROVIDER = os.getenv("LLM_FALLBACK_PROVIDER", "").strip().lower()
-
-# Optional: override model for current provider (e.g. LLM_MODEL=llama-3.1-70b)
-
+# Optional: override model for the local provider.
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip() or None
-
-# LLM temperature (0=deterministic, higher=more creative). Default 0.0
-
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0").strip() or "0.0")
-
-
-
-# Per-request LLM timeout (seconds). Without one, a stalled provider can pin an
-
-# agent slot forever; LLM_MAX_RETRIES bounds client-level retries (the graph
-
-# adds at most one more attempt on transient errors).
-
 LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120").strip() or "120")
-
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1").strip() or "1")
 
-
-
-# Ollama
-
 OLLAMA_CLOUD_HOST = "https://ollama.com"
-
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip() or None
-
-OLLAMA_CLOUD = os.getenv("OLLAMA_CLOUD", "").strip().lower() in ("1", "true", "yes")
-
+OLLAMA_CLOUD = False
 OLLAMA_CLOUD_MODEL = os.getenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b").strip() or "gpt-oss:120b"
-
-# Local-only model tag. Ignored when OLLAMA_CLOUD=true (OLLAMA_CLOUD_MODEL wins).
-
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_LOCAL_MODEL).strip() or DEFAULT_OLLAMA_LOCAL_MODEL
-
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip() or None
 
-OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "2m").strip() or "2m"
+# A legacy cloud endpoint means localhost in the local-only setup.
+if OLLAMA_BASE_URL and OLLAMA_BASE_URL.rstrip("/") == OLLAMA_CLOUD_HOST:
+    OLLAMA_BASE_URL = None
 
-
-
-# Thinking/reasoning mode for thinking-capable Ollama models. Empty = model
-
-# default. "true"/"false" force on/off; "low"/"medium"/"high" set the effort
-
-# level (gpt-oss only — high = best accuracy, more latency). Reasoning content
-
-# goes to a separate channel, keeping the answer itself clean.
-
-OLLAMA_REASONING = os.getenv("OLLAMA_REASONING", "").strip().lower()
-
-if LLM_LOCAL_ONLY:
-    LLM_PROVIDER = "ollama"
-    LLM_FALLBACK_PROVIDERS = ""
-    LLM_FALLBACK_PROVIDER = ""
-    OLLAMA_CLOUD = False
-    OLLAMA_MODEL = os.getenv("OLLAMA_LOCAL_MODEL", DEFAULT_OLLAMA_LOCAL_MODEL).strip() or DEFAULT_OLLAMA_LOCAL_MODEL
-    OLLAMA_BASE_URL = os.getenv("OLLAMA_LOCAL_BASE_URL", "").strip() or None
-    OLLAMA_REASONING = os.getenv("OLLAMA_LOCAL_REASONING", "").strip().lower()
+OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "24h").strip() or "24h"
+OLLAMA_REASONING = ""
 
 
 

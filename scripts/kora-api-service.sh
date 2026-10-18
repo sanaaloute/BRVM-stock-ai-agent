@@ -15,9 +15,8 @@ exec env DATABASE_URL="" \
      AUTH_PROVIDER=mock \
      API_PORT=8002 \
      API_BIND=0.0.0.0 \
-     LLM_LOCAL_ONLY=true \
-     OLLAMA_LOCAL_BASE_URL= \
-     OLLAMA_LOCAL_MODEL=modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M \
-     OLLAMA_LOCAL_REASONING= \
+     OLLAMA_BASE_URL= \
+     OLLAMA_MODEL=modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M \
+     OLLAMA_KEEP_ALIVE=24h \
      ${TAVILY:+TAVILY_API_KEY=$TAVILY} \
      "$PYTHON" -m scripts.run_api

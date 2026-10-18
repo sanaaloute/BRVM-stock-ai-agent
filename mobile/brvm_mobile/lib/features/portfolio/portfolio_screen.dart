@@ -5,20 +5,98 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/format.dart';
 import '../../core/ui.dart';
+import '../market/market_models.dart';
 import '../market/market_providers.dart';
+import 'portfolio_chart.dart';
+import 'portfolio_import_dialog.dart';
 import 'portfolio_models.dart';
+import 'portfolio_sgi_chart.dart';
 import 'portfolio_providers.dart';
 
 /// Onglet « Portefeuille » : valorisation agrégée des positions, chaque
 /// position regroupant ses lignes d'achat (lots).
-class PortfolioScreen extends ConsumerWidget {
+enum _PositionFilter { all, gain, loss }
+
+List<BrokerEntry> _sortedBrokers(Iterable<dynamic> brokers) {
+  final sorted = brokers
+      .whereType<BrokerEntry>()
+      .where((broker) => broker.fullName.isNotEmpty)
+      .toList();
+  sorted.sort(
+    (a, b) =>
+        normalizeForSearch(a.sigle).compareTo(normalizeForSearch(b.sigle)),
+  );
+  return sorted;
+}
+
+class _SgiOption extends StatelessWidget {
+  const _SgiOption({required this.broker});
+
+  final BrokerEntry broker;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      title: Text(broker.sigle, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        broker.fullName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+List<Widget> _selectedBrokerItems(
+  List<BrokerEntry> brokers,
+  String placeholder,
+) {
+  return <Widget>[
+    Text(placeholder, maxLines: 1, overflow: TextOverflow.ellipsis),
+    for (final broker in brokers)
+      Text(broker.sigle, maxLines: 1, overflow: TextOverflow.ellipsis),
+  ];
+}
+
+class PortfolioScreen extends ConsumerStatefulWidget {
   const PortfolioScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PortfolioScreen> createState() => _PortfolioScreenState();
+}
+
+class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
+  final _searchController = TextEditingController();
+  _PositionFilter _filter = _PositionFilter.all;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final portfolio = ref.watch(portfolioProvider);
     return Scaffold(
-      appBar: const KoraAppBar(title: Text('Portefeuille')),
+      appBar: KoraAppBar(
+        title: const Text('Portefeuille'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Importer un document SGI',
+            onPressed: () => SgiImportDialog.show(context),
+            icon: const Icon(Icons.upload_file),
+          ),
+          IconButton(
+            tooltip: 'Ajouter une position',
+            onPressed: () => context.push('/portefeuille/form'),
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
       body: portfolio.when(
         loading: () => const LoadingView(),
         error: (error, _) => ErrorView(
@@ -26,15 +104,20 @@ class PortfolioScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(portfolioProvider),
         ),
         data: (data) {
-          if (data.positions.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () async => ref.invalidate(portfolioProvider),
-              child: const EmptyView(
-                message: 'Votre portefeuille est vide.',
-                icon: Icons.pie_chart_outline,
-              ),
-            );
-          }
+          final query = normalizeForSearch(_searchController.text.trim());
+          final visible = data.positions.where((position) {
+            if (_filter == _PositionFilter.gain &&
+                (position.gainLossPct ?? 0) <= 0) {
+              return false;
+            }
+            if (_filter == _PositionFilter.loss &&
+                (position.gainLossPct ?? 0) >= 0) {
+              return false;
+            }
+            if (query.isEmpty) return true;
+            return normalizeForSearch(position.symbol).contains(query) ||
+                normalizeForSearch(position.sgi).contains(query);
+          }).toList();
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(portfolioProvider),
             child: ListView(
@@ -43,25 +126,106 @@ class PortfolioScreen extends ConsumerWidget {
               children: <Widget>[
                 _SummaryCard(summary: data.summary),
                 const SizedBox(height: 16),
+                const PortfolioHistoryChart(),
+                const SizedBox(height: 16),
+                PortfolioSgiChart(breakdown: data.sgiBreakdown),
+                const SizedBox(height: 16),
+                _buildFilters(data),
+                const SizedBox(height: 8),
                 Text(
                   'Positions',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
-                ...data.positions.map(
-                  (position) => _PositionCard(position: position),
-                ),
+                if (visible.isEmpty)
+                  EmptyView(
+                    message: data.positions.isEmpty
+                        ? 'Votre portefeuille est vide.'
+                        : 'Aucune position ne correspond aux filtres.',
+                    icon: Icons.pie_chart_outline,
+                    onRetry: data.positions.isEmpty
+                        ? () => ref.invalidate(portfolioProvider)
+                        : null,
+                  )
+                else
+                  ...visible.map(
+                    (position) => _PositionCard(position: position),
+                  ),
               ],
             ),
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'portfolio-fab',
-        onPressed: () => context.push('/portefeuille/form'),
-        icon: const Icon(Icons.add),
-        label: const Text('Ajouter un achat'),
+    );
+  }
+
+  Widget _buildFilters(PortfolioData data) {
+    final selectedSgi = ref.watch(portfolioSgiFilterProvider);
+    final brokers = _sortedBrokers(
+      data.sgiBreakdown.map(
+        (summary) =>
+            BrokerEntry(raw: const <String, dynamic>{}, name: summary.sgi),
       ),
+    );
+    return Column(
+      children: <Widget>[
+        DropdownButtonFormField<String?>(
+          initialValue: selectedSgi,
+          isExpanded: true,
+          itemHeight: 72,
+          selectedItemBuilder: (context) =>
+              _selectedBrokerItems(brokers, 'Tous les SGI'),
+          decoration: const InputDecoration(
+            labelText: 'SGI',
+            border: OutlineInputBorder(),
+          ),
+          items: <DropdownMenuItem<String?>>[
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('Tous les SGI'),
+            ),
+            for (final broker in brokers)
+              DropdownMenuItem<String?>(
+                value: broker.name as String,
+                child: _SgiOption(broker: broker),
+              ),
+          ],
+          onChanged: (value) {
+            ref.read(portfolioSgiFilterProvider.notifier).state = value;
+          },
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _searchController,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search),
+            hintText: 'Rechercher un titre ou une SGI',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: <Widget>[
+            ChoiceChip(
+              label: const Text('Tous'),
+              selected: _filter == _PositionFilter.all,
+              onSelected: (_) => setState(() => _filter = _PositionFilter.all),
+            ),
+            ChoiceChip(
+              label: const Text('Gains'),
+              selected: _filter == _PositionFilter.gain,
+              onSelected: (_) => setState(() => _filter = _PositionFilter.gain),
+            ),
+            ChoiceChip(
+              label: const Text('Pertes'),
+              selected: _filter == _PositionFilter.loss,
+              onSelected: (_) => setState(() => _filter = _PositionFilter.loss),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -89,22 +253,20 @@ class _SummaryCard extends StatelessWidget {
               style: theme.textTheme.headlineSmall,
             ),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                _SummaryItem(
-                  label: 'Coût d’achat',
-                  value: formatFcfa(summary.totalCostFcfa),
-                ),
-                _SummaryItem(
-                  label: 'Gain/Perte',
-                  chip: VariationChip(variation),
-                ),
-                _SummaryItem(
-                  label: 'Positions',
-                  value: '${summary.positionsCount ?? '—'}',
-                ),
-              ],
+            _SummaryItem(
+              label: 'Coût d’achat',
+              value: formatFcfa(summary.totalCostFcfa),
+            ),
+            const SizedBox(height: 12),
+            _SummaryItem(
+              label: 'Gain/Perte',
+              value:
+                  '${formatSignedFcfa(summary.gainLossFcfa)} (${formatPercent(variation)})',
+            ),
+            const SizedBox(height: 12),
+            _SummaryItem(
+              label: 'Positions',
+              value: '${summary.positionsCount ?? '—'}',
             ),
           ],
         ),
@@ -114,11 +276,8 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _SummaryItem extends StatelessWidget {
-  const _SummaryItem({
-    required this.label,
-    this.value,
-    this.chip,
-  }) : assert(value != null || chip != null, 'value ou chip requis');
+  const _SummaryItem({required this.label, this.value, this.chip})
+    : assert(value != null || chip != null, 'value ou chip requis');
 
   final String label;
   final String? value;
@@ -132,8 +291,9 @@ class _SummaryItem extends StatelessWidget {
       children: <Widget>[
         Text(
           label,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.muted),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.muted,
+          ),
         ),
         const SizedBox(height: 4),
         chip ??
@@ -141,9 +301,7 @@ class _SummaryItem extends StatelessWidget {
               value!,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
-                fontFeatures: const <FontFeature>[
-                  FontFeature.tabularFigures(),
-                ],
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
               ),
             ),
       ],
@@ -196,14 +354,22 @@ class _PositionCardState extends ConsumerState<_PositionCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
+                          position.sgi,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.muted,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
                           <String>[
                             if (position.quantity != null)
                               '${formatAmount(position.quantity)} titres',
                             if (position.avgBuyPrice != null)
                               'achat moy. ${formatFcfa(position.avgBuyPrice)}',
                           ].join(' · '),
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.muted),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.muted,
+                          ),
                         ),
                       ],
                     ),
@@ -213,6 +379,15 @@ class _PositionCardState extends ConsumerState<_PositionCard> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: <Widget>[
                       PriceText(position.currentPrice),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatSignedFcfa(position.gainLossFcfa),
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: (position.gainLossFcfa ?? 0) < 0
+                              ? theme.colorScheme.loss
+                              : theme.colorScheme.gain,
+                        ),
+                      ),
                       const SizedBox(height: 4),
                       VariationChip(position.gainLossPct),
                     ],
@@ -284,8 +459,9 @@ class _LotsPanel extends ConsumerWidget {
             padding: const EdgeInsets.all(16),
             child: Text(
               'Aucun lot détaillé.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.muted),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.muted,
+              ),
             ),
           )
         else
@@ -296,8 +472,11 @@ class _LotsPanel extends ConsumerWidget {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: () => _confirmDeleteSymbol(context, ref),
-              icon: Icon(Icons.delete_forever_outlined,
-                  size: 18, color: theme.colorScheme.loss),
+              icon: Icon(
+                Icons.delete_forever_outlined,
+                size: 18,
+                color: theme.colorScheme.loss,
+              ),
               label: Text(
                 'Tout supprimer',
                 style: TextStyle(color: theme.colorScheme.loss),
@@ -315,7 +494,8 @@ class _LotsPanel extends ConsumerWidget {
       builder: (context) => AlertDialog(
         title: Text('Supprimer ${position.symbol} ?'),
         content: const Text(
-            'Toutes les lignes d’achat de ce titre seront retirées du portefeuille.'),
+          'Toutes les lignes d’achat de ce titre seront retirées du portefeuille.',
+        ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -358,8 +538,9 @@ class _LotRow extends ConsumerWidget {
                 if (lot.buyDate != null)
                   Text(
                     lot.buyDate!,
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: theme.colorScheme.muted),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.muted,
+                    ),
                   ),
               ],
             ),
@@ -371,8 +552,11 @@ class _LotRow extends ConsumerWidget {
           ),
           IconButton(
             tooltip: 'Supprimer le lot',
-            icon: Icon(Icons.delete_outline,
-                size: 18, color: theme.colorScheme.loss),
+            icon: Icon(
+              Icons.delete_outline,
+              size: 18,
+              color: theme.colorScheme.loss,
+            ),
             onPressed: () => _confirmDeleteLot(context, ref, lot),
           ),
         ],
@@ -397,7 +581,8 @@ class _LotRow extends ConsumerWidget {
       builder: (context) => AlertDialog(
         title: const Text('Supprimer ce lot ?'),
         content: const Text(
-            'Cette ligne d’achat sera retirée de votre portefeuille.'),
+          'Cette ligne d’achat sera retirée de votre portefeuille.',
+        ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -433,14 +618,18 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
   DateTime? _buyDate;
   bool _saving = false;
   String? _error;
+  late String _sgi;
 
   @override
   void initState() {
     super.initState();
-    _priceController =
-        TextEditingController(text: widget.lot.buyPrice?.toString() ?? '');
-    _quantityController =
-        TextEditingController(text: widget.lot.quantity?.toString() ?? '');
+    _sgi = widget.lot.sgi;
+    _priceController = TextEditingController(
+      text: widget.lot.buyPrice?.toString() ?? '',
+    );
+    _quantityController = TextEditingController(
+      text: widget.lot.quantity?.toString() ?? '',
+    );
     if (widget.lot.buyDate != null) {
       _buyDate = DateTime.tryParse(widget.lot.buyDate!);
     }
@@ -482,12 +671,14 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
       });
       return;
     }
-    final message = await ref.read(portfolioProvider.notifier).updateLot(
+    final message = await ref
+        .read(portfolioProvider.notifier)
+        .updateLot(
           lotId,
           buyPrice: double.parse(_priceController.text.replaceAll(',', '.')),
           buyDate: _buyDate!.toIso8601String().substring(0, 10),
-          quantity:
-              double.parse(_quantityController.text.replaceAll(',', '.')),
+          quantity: double.parse(_quantityController.text.replaceAll(',', '.')),
+          sgi: _sgi,
         );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -507,10 +698,43 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            Builder(
+              builder: (context) {
+                final brokers = _sortedBrokers(
+                  ref.watch(brokersProvider).valueOrNull ?? const <dynamic>[],
+                );
+                return DropdownButtonFormField<String>(
+                  initialValue: _sgi,
+                  isExpanded: true,
+                  itemHeight: 72,
+                  selectedItemBuilder: (context) =>
+                      _selectedBrokerItems(brokers, 'Non affecté'),
+                  decoration: const InputDecoration(
+                    labelText: 'SGI',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: <DropdownMenuItem<String>>[
+                    const DropdownMenuItem<String>(
+                      value: 'Non affecté',
+                      child: Text('Non affecté'),
+                    ),
+                    for (final broker in brokers)
+                      DropdownMenuItem<String>(
+                        value: broker.name as String,
+                        child: _SgiOption(broker: broker),
+                      ),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _sgi = value ?? 'Non affecté'),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _priceController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               inputFormatters: <TextInputFormatter>[
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
               ],
@@ -519,8 +743,9 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
                 border: OutlineInputBorder(),
               ),
               validator: (value) {
-                final parsed =
-                    double.tryParse((value ?? '').replaceAll(',', '.'));
+                final parsed = double.tryParse(
+                  (value ?? '').replaceAll(',', '.'),
+                );
                 if (parsed == null || parsed <= 0) {
                   return 'Saisissez un prix valide.';
                 }
@@ -530,8 +755,9 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
             const SizedBox(height: 12),
             TextFormField(
               controller: _quantityController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               inputFormatters: <TextInputFormatter>[
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
               ],
@@ -540,8 +766,9 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
                 border: OutlineInputBorder(),
               ),
               validator: (value) {
-                final parsed =
-                    double.tryParse((value ?? '').replaceAll(',', '.'));
+                final parsed = double.tryParse(
+                  (value ?? '').replaceAll(',', '.'),
+                );
                 if (parsed == null || parsed <= 0) {
                   return 'Saisissez une quantité valide.';
                 }
@@ -587,8 +814,7 @@ class PositionFormScreen extends ConsumerStatefulWidget {
   const PositionFormScreen({super.key});
 
   @override
-  ConsumerState<PositionFormScreen> createState() =>
-      _PositionFormScreenState();
+  ConsumerState<PositionFormScreen> createState() => _PositionFormScreenState();
 }
 
 class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
@@ -599,6 +825,7 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
   DateTime? _buyDate;
   bool _saving = false;
   String? _error;
+  String _sgi = 'Non affecté';
 
   @override
   void initState() {
@@ -638,11 +865,14 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
       _saving = true;
     });
     final symbol = _symbolController.text.trim().toUpperCase();
-    final message = await ref.read(portfolioProvider.notifier).addLot(
+    final message = await ref
+        .read(portfolioProvider.notifier)
+        .addLot(
           symbol,
           double.parse(_priceController.text.replaceAll(',', '.')),
           _buyDate!.toIso8601String().substring(0, 10),
           double.parse(_quantityController.text.replaceAll(',', '.')),
+          sgi: _sgi,
         );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -655,8 +885,8 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final knownSymbols = ref.watch(palmaresSymbolsProvider).valueOrNull ??
-        const <String>[];
+    final knownSymbols =
+        ref.watch(palmaresSymbolsProvider).valueOrNull ?? const <String>[];
     return Scaffold(
       appBar: const KoraAppBar(title: Text('Ajouter un achat')),
       body: SafeArea(
@@ -677,8 +907,7 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                           .toList();
                     },
                     onSelected: (value) => _symbolController.text = value,
-                    fieldViewBuilder:
-                        (context, fieldController, focusNode, _) {
+                    fieldViewBuilder: (context, fieldController, focusNode, _) {
                       fieldController.text = _symbolController.text;
                       fieldController.addListener(() {
                         _symbolController.text = fieldController.text;
@@ -695,8 +924,9 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                         validator: (value) {
                           final v = value?.trim() ?? '';
                           if (v.isEmpty) return 'Saisissez un symbole.';
-                          if (!RegExp(r'^[A-Za-z0-9&.\- ]{1,15}$')
-                              .hasMatch(v)) {
+                          if (!RegExp(
+                            r'^[A-Za-z0-9&.\- ]{1,15}$',
+                          ).hasMatch(v)) {
                             return 'Symbole invalide.';
                           }
                           return null;
@@ -715,14 +945,48 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                     ),
                     validator: (value) =>
                         (value == null || value.trim().isEmpty)
-                            ? 'Saisissez un symbole.'
-                            : null,
+                        ? 'Saisissez un symbole.'
+                        : null,
                   ),
+                const SizedBox(height: 16),
+                Builder(
+                  builder: (context) {
+                    final brokers = _sortedBrokers(
+                      ref.watch(brokersProvider).valueOrNull ??
+                          const <dynamic>[],
+                    );
+                    return DropdownButtonFormField<String>(
+                      initialValue: _sgi,
+                      isExpanded: true,
+                      itemHeight: 72,
+                      selectedItemBuilder: (context) =>
+                          _selectedBrokerItems(brokers, 'Non affecté'),
+                      decoration: const InputDecoration(
+                        labelText: 'SGI',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: 'Non affecté',
+                          child: Text('Non affecté'),
+                        ),
+                        for (final broker in brokers)
+                          DropdownMenuItem<String>(
+                            value: broker.name as String,
+                            child: _SgiOption(broker: broker),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _sgi = value ?? 'Non affecté'),
+                    );
+                  },
+                ),
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _priceController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: <TextInputFormatter>[
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
@@ -731,8 +995,9 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
-                    final parsed =
-                        double.tryParse((value ?? '').replaceAll(',', '.'));
+                    final parsed = double.tryParse(
+                      (value ?? '').replaceAll(',', '.'),
+                    );
                     if (parsed == null || parsed <= 0) {
                       return 'Saisissez un prix valide.';
                     }
@@ -742,8 +1007,9 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _quantityController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: <TextInputFormatter>[
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
@@ -752,8 +1018,9 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
-                    final parsed =
-                        double.tryParse((value ?? '').replaceAll(',', '.'));
+                    final parsed = double.tryParse(
+                      (value ?? '').replaceAll(',', '.'),
+                    );
                     if (parsed == null || parsed <= 0) {
                       return 'Saisissez une quantité valide.';
                     }

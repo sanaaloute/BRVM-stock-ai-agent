@@ -5,15 +5,16 @@ shared with the Telegram identity when the accounts are linked.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 import config
 from app.api.mobile_auth import require_app_user
-from app.services import auth_service
+from app.services import auth_service, sgi_import
 from app.utils import user_db
 
 router = APIRouter(prefix="/mobile/v1", tags=["mobile"])
@@ -352,15 +353,32 @@ class HoldingBody(BaseModel):
     buy_price: float = Field(gt=0)
     buy_date: str = Field(min_length=8, max_length=10)  # AAAA-MM-JJ
     quantity: float = Field(default=1.0, gt=0)
+    sgi: str | None = None
 
 
 @router.get("/portfolio")
-def portfolio_get(user: dict = Depends(require_app_user)) -> dict[str, Any]:
-    """Aggregated positions (one per symbol) with the individual buy lots."""
+def portfolio_get(
+    sgi: str | None = Query(default=None),
+    user: dict = Depends(require_app_user),
+) -> dict[str, Any]:
+    """Aggregated positions and per-SGI summaries, optionally filtered by SGI."""
     pid = _principal(user)
     return {
-        "summary": user_db.portfolio_summary(pid),
-        "positions": user_db.portfolio_with_prices(pid),
+        "summary": user_db.portfolio_summary(pid, sgi=sgi),
+        "positions": user_db.portfolio_with_prices(pid, sgi=sgi),
+        "sgi_breakdown": user_db.portfolio_sgi_breakdown(pid),
+    }
+
+
+@router.get("/portfolio/history")
+def portfolio_history_get(
+    days: int = Query(90, ge=7, le=366),
+    sgi: str | None = Query(default=None),
+    user: dict = Depends(require_app_user),
+) -> dict[str, Any]:
+    return {
+        "days": days,
+        "points": user_db.portfolio_history(_principal(user), days, sgi=sgi),
     }
 
 
@@ -368,10 +386,70 @@ def portfolio_get(user: dict = Depends(require_app_user)) -> dict[str, Any]:
 def portfolio_add(body: HoldingBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
     """Record one buy lot (never overwrites previous purchases)."""
     result = user_db.portfolio_add(
-        _principal(user), body.symbol, body.buy_price, body.buy_date, body.quantity
+        _principal(user), body.symbol, body.buy_price, body.buy_date, body.quantity, sgi=body.sgi
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+class SgiImportConfirmBody(BaseModel):
+    content_hash: str = Field(min_length=64, max_length=64)
+    transactions: list[sgi_import.SgiTransaction]
+
+
+def _import_http_error(exc: sgi_import.DocumentError) -> HTTPException:
+    if exc.code == "document_too_large":
+        status = 413
+    elif exc.code == "extraction_failed":
+        status = 503
+    else:
+        status = 422
+    return HTTPException(status_code=status, detail=exc.message)
+
+
+@router.post("/portfolio/import/parse")
+async def portfolio_import_parse(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_app_user),
+) -> dict[str, Any]:
+    try:
+        content = await file.read(sgi_import.MAX_DOCUMENT_BYTES + 1)
+        text, truncated = sgi_import.extract_document_text(file.filename or "", content)
+        transactions, warnings = sgi_import.extract_transactions(text)
+        if truncated:
+            warnings.insert(0, "Le texte du document a été tronqué pour rester dans la limite de traitement.")
+        return {
+            "content_hash": hashlib.sha256(content).hexdigest(),
+            "transactions": transactions,
+            "warnings": warnings,
+        }
+    except sgi_import.DocumentError as exc:
+        raise _import_http_error(exc) from exc
+    finally:
+        await file.close()
+
+
+@router.post("/portfolio/import/confirm")
+def portfolio_import_confirm(
+    body: SgiImportConfirmBody,
+    user: dict = Depends(require_app_user),
+) -> dict[str, Any]:
+    try:
+        transactions, _ = sgi_import.validate_transactions(
+            [tx.model_dump() for tx in body.transactions],
+            strict=True,
+        )
+    except sgi_import.DocumentError as exc:
+        raise _import_http_error(exc) from exc
+    if not transactions:
+        raise HTTPException(status_code=422, detail="Aucune transaction à appliquer.")
+    result = user_db.portfolio_apply_import(
+        _principal(user), body.content_hash, transactions
+    )
+    if not result.get("ok"):
+        status = 409 if result.get("error") == "already_imported" else 400
+        raise HTTPException(status_code=status, detail=result.get("error"))
     return result
 
 
@@ -379,13 +457,14 @@ class LotBody(BaseModel):
     buy_price: float | None = Field(default=None, gt=0)
     buy_date: str | None = Field(default=None, min_length=8, max_length=10)
     quantity: float | None = Field(default=None, gt=0)
+    sgi: str | None = None
 
 
 @router.put("/portfolio/lots/{lot_id}")
 def portfolio_lot_update(lot_id: int, body: LotBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
     result = user_db.portfolio_lot_update(
         _principal(user), lot_id,
-        buy_price=body.buy_price, buy_date=body.buy_date, quantity=body.quantity,
+        buy_price=body.buy_price, buy_date=body.buy_date, quantity=body.quantity, sgi=body.sgi,
     )
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result.get("error"))

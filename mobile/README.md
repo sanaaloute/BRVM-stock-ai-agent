@@ -14,7 +14,10 @@ Fonctionnalités :
   courtiers, actualités.
 - **Kora (assistant IA)** : chat conversationnel (texte + graphiques), quota
   affiché, gestion/suppression des conversations.
-- **Portefeuille** : positions, valorisation, gain/perte, ajout/modification.
+- **Portefeuille** : positions par SGI, valorisation, gains/pertes en FCFA et
+  en %, dividendes, graphique d'évolution et répartition en camembert, filtres
+  SGI/titres/gains/pertes, ajout/modification et import de relevés SGI PDF/DOCX
+  (achats, ventes et dividendes, vérification avant import, document non conservé).
 - **Alertes de prix** : au-dessus / en dessous d'un cours cible.
 - **Moi (Compte)** : profil, apparence (thème), digest quotidien/hebdomadaire,
   quota, déconnexion.

@@ -101,4 +101,107 @@ void main() {
       expect(data.positions.single.symbol, 'SONATEL');
     });
   });
+
+  group('SGI import, amounts, and history models', () {
+    test('parses gain/loss amounts and history points', () {
+      final data = PortfolioData.fromJson(<String, dynamic>{
+        'summary': <String, dynamic>{
+          'total_cost_fcfa': 100000.0,
+          'total_value_fcfa': 112000.0,
+          'gain_loss_fcfa': 12000.0,
+          'gain_loss_pct': 12.0,
+        },
+        'positions': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'symbol': 'NTLC',
+            'current_price': 56000.0,
+            'current_value_fcfa': 112000.0,
+            'gain_loss_fcfa': 12000.0,
+            'gain_loss_pct': 12.0,
+          },
+        ],
+      });
+      expect(data.summary.gainLossFcfa, 12000.0);
+      expect(data.positions.single.currentValueFcfa, 112000.0);
+      expect(data.positions.single.gainLossFcfa, 12000.0);
+
+      final point = PortfolioHistoryPoint.fromJson(<String, dynamic>{
+        'day': '2026-03-01',
+        'total_cost_fcfa': 100000.0,
+        'total_value_fcfa': 112000.0,
+        'gain_loss_fcfa': 12000.0,
+        'gain_loss_pct': 12.0,
+      });
+      expect(point.day, DateTime(2026, 3, 1));
+      expect(point.totalValueFcfa, 112000.0);
+      expect(point.gainLossFcfa, 12000.0);
+    });
+
+    test('parses SGI import preview and serializes transactions', () {
+      final preview = SgiImportPreview.fromJson(<String, dynamic>{
+        'content_hash': 'a' * 64,
+        'transactions': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'symbol': 'NTLC',
+            'side': 'sell',
+            'date': '2026-02-01',
+            'quantity': 3.0,
+            'price': 52000.0,
+          },
+        ],
+        'warnings': <String>['warning'],
+      });
+      expect(preview.contentHash, hasLength(64));
+      expect(preview.warnings, <String>['warning']);
+      expect(preview.transactions.single.sideLabel, 'Vente');
+      expect(preview.transactions.single.toJson()['side'], 'sell');
+    });
+
+    test('parses SGI breakdown and dividend history', () {
+      final data = PortfolioData.fromJson(<String, dynamic>{
+        'summary': <String, dynamic>{},
+        'positions': <Map<String, dynamic>>[],
+        'sgi_breakdown': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'sgi': 'PHOENIX CAPITAL MANAGEMENT',
+            'positions_count': 2,
+            'quantity': 12.5,
+            'total_cost_fcfa': 100000.0,
+            'current_value_fcfa': 112000.0,
+            'gain_loss_fcfa': 12000.0,
+            'gain_loss_pct': 12.0,
+            'dividends_fcfa': 5000.0,
+          },
+        ],
+      });
+      final summary = data.sgiBreakdown.single;
+      expect(summary.positionsCount, 2);
+      expect(summary.quantity, 12.5);
+      expect(summary.currentValueFcfa, 112000.0);
+      expect(summary.dividendsFcfa, 5000.0);
+
+      final point = PortfolioHistoryPoint.fromJson(<String, dynamic>{
+        'day': '2026-03-01',
+        'total_cost_fcfa': 100000.0,
+        'total_value_fcfa': 112000.0,
+        'gain_loss_fcfa': 12000.0,
+        'gain_loss_pct': 12.0,
+        'dividends_fcfa': 5000.0,
+      });
+      expect(point.dividendsFcfa, 5000.0);
+
+      final transaction = SgiTransaction.fromJson(<String, dynamic>{
+        'symbol': 'NTLC',
+        'side': 'dividend',
+        'date': '2026-02-15',
+        'quantity': 0,
+        'price': 0,
+        'amount': 5000.0,
+        'sgi': 'PHOENIX CAPITAL MANAGEMENT',
+      });
+      expect(transaction.sideLabel, 'Dividende');
+      expect(transaction.amount, 5000.0);
+      expect(transaction.sgi, 'PHOENIX CAPITAL MANAGEMENT');
+    });
+  });
 }

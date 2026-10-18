@@ -29,7 +29,8 @@ from app.api import mobile_auth  # noqa: E402
 from app.services import predictions, scoring  # noqa: E402
 from app.utils import user_db  # noqa: E402
 
-TODAY_ISO = datetime.now(timezone.utc).date().isoformat()
+def _today_iso():
+    return date.today().isoformat()
 JWT_SECRET = "test-jwt-secret-predictions"
 
 
@@ -171,10 +172,10 @@ def test_run_daily_predictions_persists_and_is_idempotent():
         res2 = predictions.run_daily_predictions()  # same day: replaces rows
         rows2 = user_db.get_latest_predictions()
     assert res1["count"] == 2 and res1["errors"] == 0, res1
-    assert res1["day"] == TODAY_ISO
+    assert res1["day"] == _today_iso()
     assert len(rows1) == 2
     assert len(rows2) == 2, "re-run the same day must not duplicate rows"
-    assert user_db.get_latest_prediction_day() == TODAY_ISO
+    assert user_db.get_latest_prediction_day() == _today_iso()
     by_sym = {r["symbol"]: r for r in rows2}
     assert by_sym[SYM_UP]["direction"] == "hausse"
     assert by_sym[SYM_DOWN]["direction"] == "baisse"
@@ -305,7 +306,7 @@ def test_api_predictions_list_and_detail():
     r = client.get("/mobile/v1/market/predictions", headers=h)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["day"] == TODAY_ISO
+    assert body["day"] == _today_iso()
     items = body["predictions"]
     # Sorted by confidence desc: SNTS (88) before NTLC (62).
     assert [p["symbol"] for p in items] == [SYM_UP, SYM_DOWN]
@@ -315,7 +316,7 @@ def test_api_predictions_list_and_detail():
     r = client.get(f"/mobile/v1/market/predictions/{SYM_UP}", headers=h)
     assert r.status_code == 200, r.text
     detail = r.json()
-    assert detail["symbol"] == SYM_UP and detail["day"] == TODAY_ISO
+    assert detail["symbol"] == SYM_UP and detail["day"] == _today_iso()
     assert detail["explanation"] == "Tendance haussière attendue."
     assert detail["target_low"] == 242.0 and detail["target_high"] == 258.0
     assert detail["details"]["votes"] == [{"label": "Cours vs MM20", "vote": 1}]

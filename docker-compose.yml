@@ -51,10 +51,9 @@ services:
       # service and the published port can reach it. Host-side exposure is
       # limited by the ports mapping below (default 127.0.0.1).
       - API_BIND=0.0.0.0
-      - LLM_LOCAL_ONLY=${LLM_LOCAL_ONLY:-true}
-      - OLLAMA_LOCAL_MODEL=${OLLAMA_LOCAL_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
-      - OLLAMA_LOCAL_BASE_URL=${OLLAMA_LOCAL_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_LOCAL_REASONING=${OLLAMA_LOCAL_REASONING:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
       # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
       # must match the market. Override TZ in .env.
       - TZ=${TZ:-Africa/Abidjan}
@@ -93,10 +92,9 @@ services:
     environment:
       - BRVM_API_URL=http://api:8000
       - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
-      - LLM_LOCAL_ONLY=${LLM_LOCAL_ONLY:-true}
-      - OLLAMA_LOCAL_MODEL=${OLLAMA_LOCAL_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
-      - OLLAMA_LOCAL_BASE_URL=${OLLAMA_LOCAL_BASE_URL:-http://host.docker.internal:11434}
-      - OLLAMA_LOCAL_REASONING=${OLLAMA_LOCAL_REASONING:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
       # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
       # must match the market. Override TZ in .env.
       - TZ=${TZ:-Africa/Abidjan}

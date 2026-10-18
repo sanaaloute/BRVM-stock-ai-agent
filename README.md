@@ -6,7 +6,7 @@ Scrape and query BRVM (Bourse Régionale des Valeurs Mobilières) / West African
 
 ## Mobile platform — Kora Bourse
 
-The same engine powers **Kora Bourse**, a Flutter mobile app (Android + iOS) for regional investors: AI advisor chat ("Kora") with persistent conversation history, live market palmares with search/filters, rich stock detail (price chart, fundamentals, dividends, news, technical prediction), portfolio buy-lots with weighted-average positions, price alerts, daily digest and SGI broker profiles — all over an authenticated REST API (`/mobile/v1/*`: email-or-phone + password auth with JWT sessions, per-user quota, market snapshots served from the local DB with a scheduled post-close refresh). Source in [`mobile/`](mobile/README.md); app identity `com.neobytech.korabourse`. No Firebase dependency; push is pluggable via `PushService`.
+The same engine powers **Kora Bourse**, a Flutter mobile app (Android + iOS) for regional investors: AI advisor chat ("Kora") with persistent conversation history, live market palmares with search/filters, rich stock detail (price chart, fundamentals, dividends, news, technical prediction), portfolio buy-lots with weighted-average positions, SGI PDF/DOCX imports with buy/sell/dividend preview, per-SGI positions and dividend totals, allocation pie charts, portfolio history charts and FCFA gain/loss amounts, price alerts, daily digest and SGI broker profiles — all over an authenticated REST API (`/mobile/v1/*`: email-or-phone + password auth with JWT sessions, per-user quota, market snapshots served from the local DB with a scheduled post-close refresh). Source in [`mobile/`](mobile/README.md); app identity `com.neobytech.korabourse`. No Firebase dependency; push is pluggable via `PushService`.
 
 ## Project tree
 
@@ -96,7 +96,7 @@ RealTimeStock/
    Edit `.env` and set at least:
 
    - `TAVILY_API_KEY` — [tavily.com](https://tavily.com)
-   - Local LLM: local-only Ollama is the default (`LLM_LOCAL_ONLY=true`), using Qwen3-VL-8B. Select another installed model with `OLLAMA_LOCAL_MODEL` (GPT-OSS-20B, Nemotron-3-Nano-4B, Qwen2.5-3B, etc.). External providers and fallbacks are legacy options that require `LLM_LOCAL_ONLY=false` — see `.env.example`.
+   - Local LLM: the app uses local Ollama only. Select an installed model with `OLLAMA_MODEL` (Qwen3-VL-8B by default; GPT-OSS-20B, Nemotron-3-Nano-4B, Qwen2.5-3B, etc.). `OLLAMA_BASE_URL` is optional for a custom endpoint, and `OLLAMA_KEEP_ALIVE` defaults to 24h (`-1` keeps the model indefinitely, with care for RAM).
 
    For the Telegram bot:
 

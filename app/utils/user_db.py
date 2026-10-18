@@ -11,17 +11,17 @@ All public functions keep identical signatures on both backends.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Text, cast, delete, func, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.db import engine as db_engine
 from app.db import migrate as db_migrate
 from app.db import models
-from app.utils._data import fetch_palmares, load_price_on_or_before
+from app.utils._data import fetch_palmares, load_price_on_or_before, load_series
 from app.utils.brvm_companies import get_valid_symbols
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "brvm_bot.db"
@@ -152,11 +152,11 @@ def mark_help_sent(telegram_id: int) -> None:
 
 
 # --- Portfolio (buy lots: one row per purchase; positions are aggregates) ----
-def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str, quantity: float = 1.0) -> dict[str, Any]:
-    """Record one buy lot. Re-adding the same symbol creates a SECOND lot (it
-    never overwrites the previous purchase). Returns {ok, message, error}."""
+def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str, quantity: float = 1.0, sgi: str | None = None) -> dict[str, Any]:
+    """Record one buy lot with its SGI, without overwriting earlier purchases."""
     get_or_create_user(telegram_id)
     symbol = (symbol or "").strip().upper()
+    sgi_name = (sgi or "Non affecté").strip() or "Non affecté"
     if symbol not in get_valid_symbols():
         return {"ok": False, "error": f"{symbol} n'est pas un symbole BRVM coté."}
     try:
@@ -172,6 +172,7 @@ def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str
                 models.Portfolio.__table__.insert().values(
                     telegram_id=telegram_id,
                     symbol=symbol,
+                    sgi=sgi_name,
                     buy_price=buy_price,
                     buy_date=buy_date_str,
                     quantity=quantity,
@@ -183,13 +184,14 @@ def portfolio_add(telegram_id: int, symbol: str, buy_price: float, buy_date: str
 
 
 def portfolio_list(telegram_id: int) -> list[dict[str, Any]]:
-    """All buy lots for the user (newest first), each with its lot id."""
+    """All buy lots for the user (newest first), each with its lot id and SGI."""
     get_or_create_user(telegram_id)
     with db_engine.session_scope() as s:
         rows = s.execute(
             select(
                 models.Portfolio.id,
                 models.Portfolio.symbol,
+                models.Portfolio.sgi,
                 models.Portfolio.buy_price,
                 models.Portfolio.buy_date,
                 models.Portfolio.quantity,
@@ -202,12 +204,13 @@ def portfolio_list(telegram_id: int) -> list[dict[str, Any]]:
 
 
 def portfolio_positions(telegram_id: int) -> list[dict[str, Any]]:
-    """Aggregate lots into positions: one entry per symbol with total quantity,
-    weighted average buy price, total cost and the individual lots."""
-    positions: dict[str, dict[str, Any]] = {}
+    """Aggregate lots by symbol and SGI, keeping each broker's positions separate."""
+    positions: dict[tuple[str, str], dict[str, Any]] = {}
     for lot in portfolio_list(telegram_id):
-        pos = positions.setdefault(lot["symbol"], {
+        key = (lot["symbol"], lot.get("sgi") or "Non affecté")
+        pos = positions.setdefault(key, {
             "symbol": lot["symbol"],
+            "sgi": lot.get("sgi") or "Non affecté",
             "quantity": 0.0,
             "total_cost": 0.0,
             "lots": [],
@@ -220,12 +223,12 @@ def portfolio_positions(telegram_id: int) -> list[dict[str, Any]]:
         pos["avg_buy_price"] = round(pos["total_cost"] / pos["quantity"], 2) if pos["quantity"] else None
         pos["total_cost"] = round(pos["total_cost"], 2)
         out.append(pos)
-    return sorted(out, key=lambda p: p["symbol"])
+    return sorted(out, key=lambda p: (p["symbol"], p["sgi"]))
 
 
 def portfolio_symbols(telegram_id: int) -> list[str]:
     """Distinct symbols held (one entry per symbol regardless of lot count)."""
-    return [p["symbol"] for p in portfolio_positions(telegram_id)]
+    return sorted({p["symbol"] for p in portfolio_positions(telegram_id)})
 
 
 def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
@@ -244,10 +247,12 @@ def portfolio_remove(telegram_id: int, symbol: str) -> dict[str, Any]:
         return {"ok": False, "error": f"Aucune position {symbol} dans votre portefeuille."}
 
 
-def portfolio_lot_update(telegram_id: int, lot_id: int, *, buy_price: float | None = None, buy_date: str | None = None, quantity: float | None = None) -> dict[str, Any]:
-    """Edit one lot's price/date/quantity (mobile API)."""
+def portfolio_lot_update(telegram_id: int, lot_id: int, *, buy_price: float | None = None, buy_date: str | None = None, quantity: float | None = None, sgi: str | None = None) -> dict[str, Any]:
+    """Edit one lot's SGI, price/date/quantity (mobile API)."""
     _ensure_ready()
     values: dict[str, Any] = {}
+    if sgi is not None:
+        values["sgi"] = sgi.strip() or "Non affecté"
     if buy_price is not None:
         if buy_price <= 0:
             return {"ok": False, "error": "Le prix d'achat doit être positif."}
@@ -312,36 +317,40 @@ def current_price(symbol: str) -> float | None:
     return _current_price(symbol)
 
 
-def portfolio_with_prices(telegram_id: int) -> list[dict[str, Any]]:
-    """Aggregated positions (one per symbol) with current price and gain/loss %.
-
-    Each row: symbol, quantity, avg_buy_price, total_cost, current_price,
-    gain_loss_pct, lots[]. `buy_price` mirrors avg_buy_price for backward
-    compatibility with existing consumers."""
+def portfolio_with_prices(telegram_id: int, sgi: str | None = None) -> list[dict[str, Any]]:
+    """Aggregated positions with SGI, current value and gain/loss amount/percent."""
+    positions = portfolio_positions(telegram_id)
+    if sgi is not None:
+        positions = [pos for pos in positions if (pos.get("sgi") or "Non affecté") == sgi]
     rows = []
-    for pos in portfolio_positions(telegram_id):
+    for pos in positions:
         sym = pos["symbol"]
         avg = pos["avg_buy_price"]
         current = _current_price(sym)
+        current_value = round(current * pos["quantity"], 2) if current is not None else None
+        gain_loss = round(current_value - pos["total_cost"], 2) if current_value is not None else None
         gain_pct = None
         if current is not None and avg:
             gain_pct = round((current - avg) / avg * 100, 2)
         rows.append({
             "symbol": sym,
+            "sgi": pos.get("sgi") or "Non affecté",
             "quantity": pos["quantity"],
             "avg_buy_price": avg,
             "buy_price": avg,  # back-compat: weighted average price
             "total_cost": pos["total_cost"],
             "current_price": current,
+            "current_value_fcfa": current_value,
+            "gain_loss_fcfa": gain_loss,
             "gain_loss_pct": gain_pct,
             "lots": pos["lots"],
         })
     return rows
 
 
-def portfolio_summary(telegram_id: int) -> dict[str, Any]:
-    """Total cost, total value, overall gain/loss % over aggregated positions."""
-    rows = portfolio_with_prices(telegram_id)
+def portfolio_summary(telegram_id: int, sgi: str | None = None) -> dict[str, Any]:
+    """Total cost, total value, overall gain/loss amount and percent, optionally by SGI."""
+    rows = portfolio_with_prices(telegram_id, sgi=sgi)
     total_cost = sum(r["total_cost"] for r in rows)
     total_value = 0.0
     for r in rows:
@@ -356,10 +365,327 @@ def portfolio_summary(telegram_id: int) -> dict[str, Any]:
     return {
         "total_cost_fcfa": round(total_cost, 2),
         "total_value_fcfa": round(total_value, 2),
+        "gain_loss_fcfa": round(total_value - total_cost, 2),
         "gain_loss_pct": gain_pct,
         "positions_count": len(rows),
         "lots_count": sum(len(r["lots"]) for r in rows),
     }
+
+
+def portfolio_sgi_breakdown(telegram_id: int) -> list[dict[str, Any]]:
+    """Current value, gain/loss and dividend totals for each SGI."""
+    with db_engine.session_scope() as s:
+        dividend_rows = s.execute(
+            select(
+                models.PortfolioDividend.sgi,
+                func.sum(models.PortfolioDividend.amount),
+            )
+            .where(models.PortfolioDividend.telegram_id == telegram_id)
+            .group_by(models.PortfolioDividend.sgi)
+        ).all()
+    dividends = {row[0]: float(row[1] or 0) for row in dividend_rows}
+    groups: dict[str, dict[str, Any]] = {}
+    for row in portfolio_with_prices(telegram_id):
+        name = row.get("sgi") or "Non affecté"
+        group = groups.setdefault(name, {
+            "sgi": name,
+            "positions_count": 0,
+            "quantity": 0.0,
+            "total_cost_fcfa": 0.0,
+            "current_value_fcfa": 0.0,
+            "gain_loss_fcfa": 0.0,
+            "dividends_fcfa": dividends.get(name, 0.0),
+        })
+        group["positions_count"] += 1
+        group["quantity"] += row["quantity"]
+        group["total_cost_fcfa"] += row["total_cost"]
+        group["current_value_fcfa"] += row["current_value_fcfa"] if row["current_value_fcfa"] is not None else row["total_cost"]
+        group["gain_loss_fcfa"] += row["gain_loss_fcfa"] if row["gain_loss_fcfa"] is not None else 0
+    out = []
+    for group in groups.values():
+        for key in ("quantity", "total_cost_fcfa", "current_value_fcfa", "gain_loss_fcfa", "dividends_fcfa"):
+            group[key] = round(group[key], 2)
+        group["gain_loss_pct"] = (
+            round(group["gain_loss_fcfa"] / group["total_cost_fcfa"] * 100, 2)
+            if group["total_cost_fcfa"]
+            else None
+        )
+        out.append(group)
+    return sorted(out, key=lambda group: group["current_value_fcfa"], reverse=True)
+
+
+def portfolio_apply_import(telegram_id: int, content_hash: str, transactions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply one validated SGI import atomically, including buys, SGI-specific sells and dividends."""
+    get_or_create_user(telegram_id)
+    if len(content_hash) != 64:
+        return {"ok": False, "error": "Empreinte du document invalide."}
+    try:
+        int(content_hash, 16)
+    except ValueError:
+        return {"ok": False, "error": "Empreinte du document invalide."}
+    if not transactions:
+        return {"ok": False, "error": "Aucune transaction à appliquer."}
+
+    cleaned = []
+    valid_symbols = get_valid_symbols()
+    for candidate in transactions:
+        symbol = str(candidate.get("symbol") or "").strip().upper()
+        side = candidate.get("side")
+        sgi = str(candidate.get("sgi") or "Non affecté").strip() or "Non affecté"
+        if symbol not in valid_symbols or side not in {"buy", "sell", "dividend"}:
+            return {"ok": False, "error": "Symbole ou type de transaction invalide."}
+        try:
+            day = date.fromisoformat(str(candidate.get("date"))[:10]).isoformat()
+            if side == "dividend":
+                amount = float(candidate.get("amount"))
+                quantity = price = 0.0
+            else:
+                quantity = float(candidate.get("quantity"))
+                price = float(candidate.get("price"))
+                amount = quantity * price
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Date, quantité, prix ou montant invalide."}
+        if amount <= 0 or quantity < 0 or price < 0:
+            return {"ok": False, "error": "Les montants, quantités et prix doivent être positifs."}
+        cleaned.append({
+            "symbol": symbol,
+            "side": side,
+            "date": day,
+            "quantity": quantity,
+            "price": price,
+            "amount": amount,
+            "sgi": sgi,
+        })
+    cleaned.sort(key=lambda tx: tx["date"])
+
+    try:
+        with db_engine.session_scope() as s:
+            import_result = s.execute(
+                models.PortfolioImport.__table__.insert().values(
+                    telegram_id=telegram_id,
+                    content_hash=content_hash,
+                    transactions_json=json.dumps(cleaned, ensure_ascii=False, separators=(",", ":")),
+                )
+            )
+            import_id = import_result.inserted_primary_key[0] if import_result.inserted_primary_key else None
+            buys = 0
+            sells = 0
+            dividends = 0
+            for tx in cleaned:
+                if tx["side"] == "dividend":
+                    s.execute(
+                        models.PortfolioDividend.__table__.insert().values(
+                            telegram_id=telegram_id,
+                            import_id=import_id,
+                            sgi=tx["sgi"],
+                            symbol=tx["symbol"],
+                            amount=tx["amount"],
+                            payment_date=tx["date"],
+                        )
+                    )
+                    dividends += 1
+                    continue
+                if tx["side"] == "buy":
+                    s.execute(
+                        models.Portfolio.__table__.insert().values(
+                            telegram_id=telegram_id,
+                            symbol=tx["symbol"],
+                            sgi=tx["sgi"],
+                            buy_price=tx["price"],
+                            buy_date=tx["date"],
+                            quantity=tx["quantity"],
+                        )
+                    )
+                    buys += 1
+                    continue
+                remaining = tx["quantity"]
+                lots = s.execute(
+                    select(models.Portfolio)
+                    .where(
+                        models.Portfolio.telegram_id == telegram_id,
+                        models.Portfolio.symbol == tx["symbol"],
+                        func.coalesce(models.Portfolio.sgi, "Non affecté") == tx["sgi"],
+                    )
+                    .order_by(models.Portfolio.buy_date, models.Portfolio.id)
+                ).scalars().all()
+                for lot in lots:
+                    if remaining <= 0:
+                        break
+                    if lot.quantity > remaining:
+                        lot.quantity -= remaining
+                        remaining = 0.0
+                    else:
+                        remaining -= lot.quantity
+                        s.delete(lot)
+                if remaining > 1e-9:
+                    raise ValueError(f"Vente supérieure aux titres détenus pour {tx['symbol']} chez {tx['sgi']}.")
+                sells += 1
+        return {
+            "ok": True,
+            "message": "Document importé avec succès.",
+            "buy_count": buys,
+            "sell_count": sells,
+            "dividend_count": dividends,
+        }
+    except IntegrityError:
+        return {"ok": False, "error": "already_imported"}
+    except (ValueError, SQLAlchemyError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) -> list[dict[str, Any]]:
+    """Estimate daily unrealized portfolio value and cumulative dividends, optionally by SGI."""
+    end = date.today()
+    start = end - timedelta(days=max(7, min(days, 366)) - 1)
+    imported_events = []
+    dividend_events = []
+    imported_buy_signatures = set()
+    with db_engine.session_scope() as s:
+        imports = s.execute(
+            select(models.PortfolioImport.transactions_json).where(
+                models.PortfolioImport.telegram_id == telegram_id
+            )
+        ).scalars().all()
+    for raw in imports:
+        try:
+            transactions = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        for tx in transactions:
+            try:
+                day = date.fromisoformat(tx["date"][:10])
+                symbol = tx["symbol"]
+                side = tx["side"]
+                broker = tx.get("sgi") or "Non affecté"
+                quantity = float(tx["quantity"])
+                price = float(tx["price"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if side == "dividend":
+                amount = float(tx.get("amount") or 0)
+                if amount > 0:
+                    dividend_events.append({
+                        "date": day,
+                        "symbol": symbol,
+                        "amount": amount,
+                        "sgi": broker,
+                    })
+                continue
+            event = {
+                "date": day,
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": price,
+                "sgi": broker,
+            }
+            imported_events.append(event)
+            if side == "buy":
+                imported_buy_signatures.add((symbol, day.isoformat(), price, broker))
+
+    manual_buy_events = []
+    for lot in portfolio_list(telegram_id):
+        signature = (
+            lot["symbol"],
+            lot["buy_date"][:10],
+            float(lot["buy_price"]),
+            lot.get("sgi") or "Non affecté",
+        )
+        if signature in imported_buy_signatures:
+            continue
+        try:
+            day = date.fromisoformat(lot["buy_date"][:10])
+        except ValueError:
+            continue
+        manual_buy_events.append({
+            "date": day,
+            "symbol": lot["symbol"],
+            "side": "buy",
+            "quantity": float(lot["quantity"]),
+            "price": float(lot["buy_price"]),
+            "sgi": lot.get("sgi") or "Non affecté",
+        })
+
+    events = sorted(manual_buy_events + imported_events, key=lambda tx: tx["date"])
+    if sgi is not None:
+        events = [tx for tx in events if tx["sgi"] == sgi]
+        dividend_events = [tx for tx in dividend_events if tx["sgi"] == sgi]
+    if not events and not dividend_events:
+        return []
+    symbols = sorted({tx["symbol"] for tx in events})
+    series = {
+        symbol: load_series(symbol, start, end, fetch_if_missing=False)
+        for symbol in symbols
+    }
+    event_dates = [tx["date"] for tx in events] + [tx["date"] for tx in dividend_events]
+    first_day = max(start, min(event_dates))
+    trading_days = sorted({
+        row["date"]
+        for rows in series.values()
+        for row in rows
+        if first_day <= row["date"] <= end
+    } | {day for day in event_dates if first_day <= day <= end})
+    if not trading_days:
+        return []
+
+    holdings: dict[tuple[str, str], list[dict[str, float]]] = {}
+    prices: dict[str, float] = {}
+    cursors = {symbol: 0 for symbol in symbols}
+    event_index = 0
+    points = []
+    for day in trading_days:
+        while event_index < len(events) and events[event_index]["date"] <= day:
+            tx = events[event_index]
+            event_index += 1
+            symbol = tx["symbol"]
+            broker = tx.get("sgi") or "Non affecté"
+            key = (symbol, broker)
+            if tx["side"] == "buy":
+                holdings.setdefault(key, []).append({
+                    "quantity": tx["quantity"],
+                    "buy_price": tx["price"],
+                })
+                continue
+            remaining = tx["quantity"]
+            for lot in holdings.get(key, []):
+                if remaining <= 0:
+                    break
+                if lot["quantity"] > remaining:
+                    lot["quantity"] -= remaining
+                    remaining = 0.0
+                else:
+                    remaining -= lot["quantity"]
+                    lot["quantity"] = 0.0
+            holdings[key] = [lot for lot in holdings.get(key, []) if lot["quantity"] > 1e-9]
+        for symbol, rows in series.items():
+            cursor = cursors[symbol]
+            while cursor < len(rows) and rows[cursor]["date"] <= day:
+                prices[symbol] = rows[cursor]["price"]
+                cursor += 1
+            cursors[symbol] = cursor
+        total_cost = round(sum(
+            lot["quantity"] * lot["buy_price"]
+            for lots in holdings.values()
+            for lot in lots
+        ), 2)
+        total_value = round(sum(
+            lot["quantity"] * prices[symbol]
+            for (symbol, _), lots in holdings.items()
+            for lot in lots
+            if symbol in prices
+        ), 2)
+        gain_loss = round(total_value - total_cost, 2)
+        gain_pct = round(gain_loss / total_cost * 100, 2) if total_cost else None
+        dividends = round(sum(tx["amount"] for tx in dividend_events if tx["date"] <= day), 2)
+        points.append({
+            "day": day.isoformat(),
+            "total_cost_fcfa": total_cost,
+            "total_value_fcfa": total_value,
+            "gain_loss_fcfa": gain_loss,
+            "gain_loss_pct": gain_pct,
+            "dividends_fcfa": dividends,
+        })
+    return points
 
 
 # --- Tracking ---

@@ -17,7 +17,6 @@ import dotenv
 dotenv.load_dotenv = lambda: None
 import config
 print(json.dumps({
-    "local_only": config.LLM_LOCAL_ONLY,
     "provider": config.LLM_PROVIDER,
     "fallbacks": config.LLM_FALLBACK_PROVIDERS,
     "legacy_fallback": config.LLM_FALLBACK_PROVIDER,
@@ -25,6 +24,7 @@ print(json.dumps({
     "model": config.OLLAMA_MODEL,
     "base_url": config.OLLAMA_BASE_URL,
     "reasoning": config.OLLAMA_REASONING,
+    "keep_alive": config.OLLAMA_KEEP_ALIVE,
 }))
 """
     result = subprocess.run(
@@ -38,56 +38,48 @@ print(json.dumps({
     return json.loads(result.stdout)
 
 
-def test_local_only_overrides_legacy_external_settings():
+def test_local_config_ignores_external_and_local_only_settings():
     cfg = read_config(
-        LLM_LOCAL_ONLY="true",
+        LLM_LOCAL_ONLY="false",
         LLM_PROVIDER="openrouter",
         LLM_FALLBACK_PROVIDERS="tokenfree,openrouter",
         LLM_FALLBACK_PROVIDER="tokenfree",
         OLLAMA_CLOUD="true",
+        OLLAMA_LOCAL_MODEL="nemotron-3-nano:4b",
+        OLLAMA_LOCAL_BASE_URL="http://ignored.example",
+        OLLAMA_LOCAL_REASONING="high",
+        OLLAMA_LOCAL_KEEP_ALIVE="2m",
         OLLAMA_BASE_URL="https://ollama.com",
         OLLAMA_MODEL="llama3.2:3b",
         OLLAMA_REASONING="high",
     )
     assert cfg == {
-        "local_only": True,
         "provider": "ollama",
         "fallbacks": "",
         "legacy_fallback": "",
         "cloud": False,
-        "model": DEFAULT_MODEL,
+        "model": "llama3.2:3b",
         "base_url": None,
         "reasoning": "",
+        "keep_alive": "24h",
     }
 
 
-def test_local_only_accepts_custom_local_settings():
+def test_custom_local_settings():
     cfg = read_config(
-        OLLAMA_LOCAL_MODEL="nemotron-3-nano:4b",
-        OLLAMA_LOCAL_BASE_URL="http://host.docker.internal:11434",
-        OLLAMA_LOCAL_REASONING="low",
+        OLLAMA_MODEL="nemotron-3-nano:4b",
+        OLLAMA_BASE_URL="http://host.docker.internal:11434",
+        OLLAMA_KEEP_ALIVE="-1",
     )
     assert cfg["provider"] == "ollama"
     assert cfg["cloud"] is False
     assert cfg["model"] == "nemotron-3-nano:4b"
     assert cfg["base_url"] == "http://host.docker.internal:11434"
-    assert cfg["reasoning"] == "low"
+    assert cfg["keep_alive"] == "-1"
+    assert cfg["reasoning"] == ""
 
 
-def test_external_opt_out_preserves_legacy_behavior():
-    cfg = read_config(
-        LLM_LOCAL_ONLY="false",
-        LLM_PROVIDER="openrouter",
-        LLM_FALLBACK_PROVIDERS="tokenfree",
-        OLLAMA_CLOUD="true",
-        OLLAMA_MODEL="qwen3:8b",
-        OLLAMA_BASE_URL="https://ollama.com",
-        OLLAMA_REASONING="high",
-    )
-    assert cfg["local_only"] is False
-    assert cfg["provider"] == "openrouter"
-    assert cfg["fallbacks"] == "tokenfree"
-    assert cfg["cloud"] is True
-    assert cfg["model"] == "qwen3:8b"
-    assert cfg["base_url"] == "https://ollama.com"
-    assert cfg["reasoning"] == "high"
+def test_default_model_and_legacy_cloud_endpoint():
+    cfg = read_config(OLLAMA_BASE_URL="https://ollama.com/")
+    assert cfg["model"] == DEFAULT_MODEL
+    assert cfg["base_url"] is None

@@ -1,0 +1,251 @@
+{
+  "symbol": "CIEC",
+  "country_code": "ci",
+  "source_url": "https://www.sikafinance.com/marches/societe/CIEC.ci",
+  "company_name": "CIE CI",
+  "code": "CI0000000212 - CIEC",
+  "presentation": "La société : Créé le 24 août 1990 par le groupe français BOUYGUES et la société d'électricité EDF, CIE est une société privée ivoirienne de monopole qui détient une concession de service public pour la production, le transport, l'exportation, l'importation, la distribution et la commercialisation d'électricité. Après deux périodes de quinze années chacune de collaboration (allant de 1990 à 2005 et de 2005 à 2020), l'état de Côte d'Ivoire et la CIE ont renouvelé leur partenariat pour une période 12 ans, soit de 2020 à 2032. La compagnie exporte de l'électricité vers le Bénin, le Burkina Faso, le Ghana, le Togo, le Mali et bientôt la Guinée.",
+  "phone": "(+225) 21-23-30-00",
+  "fax": "(+225) 21-23-30-60",
+  "address": "COMPAGNIE IVOIRIENNE D'ELECTRICITE 1, Avenue Christiani Treichville 01 BP 6923 Abidjan 01 ABIDJAN",
+  "dirigeants": "Directeur Général : Jean-Christian Turkson",
+  "nombre_titres": "56 000 000",
+  "flottant": "30,95%",
+  "valorisation": "361 200 MFCFA",
+  "shareholders": [
+    {
+      "name": "ERANOVE",
+      "pct": "54"
+    },
+    {
+      "name": "BRVM (DIVERS PORTEURS)",
+      "pct": "21"
+    },
+    {
+      "name": "ETAT DE COTE D'IVOIRE",
+      "pct": "15"
+    },
+    {
+      "name": "FCP - CIE",
+      "pct": "5"
+    },
+    {
+      "name": "SIDIP",
+      "pct": "2"
+    },
+    {
+      "name": "FCP - SODECI",
+      "pct": "1"
+    },
+    {
+      "name": "MAISON DES ACTIONNAIRES",
+      "pct": "1"
+    }
+  ],
+  "performance": {
+    "chiffre_affaires": {
+      "2021": "231 783",
+      "2022": "238 854",
+      "2023": "257 218",
+      "2024": "263 294",
+      "2025": "302 320"
+    },
+    "croissance_ca": {
+      "2021": "3,05%",
+      "2022": "7,69%",
+      "2023": "2,36%",
+      "2024": "14,82%"
+    },
+    "resultat_net": {
+      "2021": "9 757",
+      "2022": "9 819",
+      "2023": "10 633",
+      "2024": "10 101",
+      "2025": "13 127"
+    },
+    "croissance_rn": {
+      "2021": "0,64%",
+      "2022": "8,29%",
+      "2023": "-5,00%",
+      "2024": "29,96%"
+    },
+    "bnpa": {
+      "2021": "174,23",
+      "2022": "175,34",
+      "2023": "190,00",
+      "2024": "180,00",
+      "2025": "234,41"
+    },
+    "per": {
+      "2021": "37,02",
+      "2022": "36,79",
+      "2023": "33,95",
+      "2024": "35,83",
+      "2025": "27,52"
+    },
+    "dividende": {
+      "2021": "153,16",
+      "2022": "157,50",
+      "2023": "171,00",
+      "2024": "158,40",
+      "2025": "205,92"
+    }
+  },
+  "market": {
+    "beta_1an": 1.07,
+    "rsi_14": 56.16,
+    "capital_echange_pct": 0.03,
+    "valorisation_millions": null,
+    "day": {
+      "ouverture": 6800.0,
+      "plus_haut": 6800.0,
+      "plus_bas": 6600.0,
+      "cloture_veille": 6800.0,
+      "volume_titres": 18809.0,
+      "volume_fcfa": 124139400.0
+    },
+    "ranges": {
+      "1_semaine": {
+        "plus_haut": 7400.0,
+        "plus_bas": 6800.0,
+        "variation_pct": -8.84
+      },
+      "1_mois": {
+        "plus_haut": 7400.0,
+        "plus_bas": 5800.0,
+        "variation_pct": 20.58
+      },
+      "1er_janvier": {
+        "plus_haut": 7400.0,
+        "plus_bas": 2320.0,
+        "variation_pct": 181.78
+      },
+      "1_an": {
+        "plus_haut": 7400.0,
+        "plus_bas": 2255.0,
+        "variation_pct": 177.66
+      },
+      "3_ans": {
+        "plus_haut": 7400.0,
+        "plus_bas": 1520.0,
+        "variation_pct": 222.82
+      },
+      "5_ans": {
+        "plus_haut": 7400.0,
+        "plus_bas": 1520.0,
+        "variation_pct": 232.5
+      }
+    },
+    "dividend_history": [
+      {
+        "year": 2025,
+        "montant": 205.92,
+        "rendement_pct": 9.38
+      },
+      {
+        "year": 2024,
+        "montant": 158.4,
+        "rendement_pct": 9.32
+      },
+      {
+        "year": 2023,
+        "montant": 171.0,
+        "rendement_pct": 8.59
+      },
+      {
+        "year": 2022,
+        "montant": 157.5,
+        "rendement_pct": 8.31
+      },
+      {
+        "year": 2021,
+        "montant": 153.16,
+        "rendement_pct": 10.21
+      }
+    ],
+    "fetched_at": "2026-09-21T12:45:09.980435+00:00"
+  },
+  "technical_analysis": {
+    "signals": [
+      {
+        "group": "tendance",
+        "direction": "down",
+        "text": "Les cours évoluent sous leur moyenne mobile à 20 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "Les cours évoluent au-dessus de leur moyenne mobile à 50 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "up",
+        "text": "Les cours évoluent au-dessus de leur moyenne mobile à 100 jours."
+      },
+      {
+        "group": "tendance",
+        "direction": "neutral",
+        "text": "Les cours évoluent à l'intérieur des bandes de Bollinger"
+      },
+      {
+        "group": "tendance",
+        "direction": "neutral",
+        "text": "Aucune observation interprétable sur le DMI"
+      },
+      {
+        "group": "momentum",
+        "direction": "neutral",
+        "text": "Le RSI 14 jours est de 47,0%. Il est en zone neutre."
+      },
+      {
+        "group": "momentum",
+        "direction": "neutral",
+        "text": "Aucune observation n'est interprétable sur l'indicateur CCI"
+      },
+      {
+        "group": "oscillateurs",
+        "direction": "down",
+        "text": "La MACD évolue sous sa ligne de signal."
+      },
+      {
+        "group": "oscillateurs",
+        "direction": "down",
+        "text": "La Stochastique évolue sous sa ligne de signal."
+      },
+      {
+        "group": "volumes_chandeliers",
+        "direction": "neutral",
+        "text": "Aucune observation notable sur les volumes d'échanges."
+      },
+      {
+        "group": "volumes_chandeliers",
+        "direction": "neutral",
+        "text": "Aucune configuration particulière de chandeliers n'a été détectée."
+      }
+    ],
+    "up": 2,
+    "down": 3,
+    "neutral": 6,
+    "fetched_at": "2026-09-21T12:45:09.980435+00:00"
+  },
+  "sector": {
+    "name": "SERVICES PUBLICS",
+    "peers": [
+      {
+        "symbol": "CIEC",
+        "name": "CIE CI",
+        "dernier": 6450.0,
+        "variation_jour_pct": -0.77,
+        "variation_ytd_pct": 173.31
+      },
+      {
+        "symbol": "SDCC",
+        "name": "SODECI",
+        "dernier": 12485.0,
+        "variation_jour_pct": -7.48,
+        "variation_ytd_pct": 115.26
+      }
+    ],
+    "fetched_at": "2026-09-21T12:45:09.980435+00:00"
+  }
+}

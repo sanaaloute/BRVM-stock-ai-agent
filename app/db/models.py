@@ -141,9 +141,54 @@ class Portfolio(Base):
         BigInteger, ForeignKey("users.telegram_id"), nullable=False
     )
     symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    sgi: Mapped[str | None] = mapped_column(Text, nullable=True)
     buy_price: Mapped[float] = mapped_column(Float, nullable=False)
     buy_date: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[float] = mapped_column(Float, nullable=False, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PortfolioImport(Base):
+    """Metadata and validated transactions for one imported SGI document."""
+
+    __tablename__ = "portfolio_imports"
+    __table_args__ = (
+        UniqueConstraint("telegram_id", "content_hash"),
+        Index("idx_portfolio_imports_user", "telegram_id"),
+    )
+
+    id: Mapped[int] = mapped_column(_pk_int, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_id"), nullable=False
+    )
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    transactions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PortfolioDividend(Base):
+    """Dividend payment extracted from an SGI document."""
+
+    __tablename__ = "portfolio_dividends"
+    __table_args__ = (
+        Index("idx_dividends_user_sgi", "telegram_id", "sgi"),
+    )
+
+    id: Mapped[int] = mapped_column(_pk_int, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.telegram_id"), nullable=False
+    )
+    import_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("portfolio_imports.id"), nullable=True
+    )
+    sgi: Mapped[str] = mapped_column(Text, nullable=False)
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    payment_date: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

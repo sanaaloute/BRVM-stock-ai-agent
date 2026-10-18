@@ -14,10 +14,9 @@ export DATABASE_URL="" \
        AUTH_PROVIDER=mock \
        API_PORT=$API_PORT \
        API_BIND=0.0.0.0 \
-       LLM_LOCAL_ONLY=true \
-       OLLAMA_LOCAL_BASE_URL= \
-       OLLAMA_LOCAL_MODEL=modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M \
-       OLLAMA_LOCAL_REASONING=
+       OLLAMA_BASE_URL= \
+       OLLAMA_MODEL=modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M \
+       OLLAMA_KEEP_ALIVE=24h
 # Tavily key comes from .env (needed for the news fallback chain).
 TAVILY=$(grep -s '^TAVILY_API_KEY=' .env | cut -d= -f2-)
 [[ -n "$TAVILY" ]] && export TAVILY_API_KEY="$TAVILY"

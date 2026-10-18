@@ -9,6 +9,13 @@ final DateFormat _dateTimeFormat = DateFormat.yMMMd('fr_FR').add_Hm();
 String formatFcfa(double? value) =>
     value == null ? '—' : '${_amountFormat.format(value)} FCFA';
 
+/// Montant signé en FCFA : « +1 200 FCFA » / « -800 FCFA » ; « — » si null.
+String formatSignedFcfa(double? value) {
+  if (value == null) return '—';
+  final sign = value > 0 ? '+' : '';
+  return '$sign${_amountFormat.format(value)} FCFA';
+}
+
 /// « +1,2 % » / « -0,8 % » ; « — » si null.
 String formatPercent(double? value) {
   if (value == null) return '—';
@@ -39,7 +46,8 @@ String formatCompactFcfa(double? value) {
   return '${_amountFormat.format(value)} FCFA';
 }
 
-String formatDate(DateTime? date) => date == null ? '—' : _dateFormat.format(date);
+String formatDate(DateTime? date) =>
+    date == null ? '—' : _dateFormat.format(date);
 
 String formatDateTime(DateTime? date) =>
     date == null ? '—' : _dateTimeFormat.format(date);
@@ -58,12 +66,31 @@ String formatRelativeTime(DateTime? date, {DateTime? now}) {
 }
 
 const _diacriticReplacements = <String, String>{
-  'à': 'a', 'â': 'a', 'ä': 'a', 'á': 'a', 'ã': 'a', 'å': 'a',
-  'è': 'e', 'ê': 'e', 'ë': 'e', 'é': 'e',
-  'ì': 'i', 'î': 'i', 'ï': 'i', 'í': 'i',
-  'ò': 'o', 'ô': 'o', 'ö': 'o', 'ó': 'o', 'õ': 'o',
-  'ù': 'u', 'û': 'u', 'ü': 'u', 'ú': 'u',
-  'ç': 'c', 'ñ': 'n',
+  'à': 'a',
+  'â': 'a',
+  'ä': 'a',
+  'á': 'a',
+  'ã': 'a',
+  'å': 'a',
+  'è': 'e',
+  'ê': 'e',
+  'ë': 'e',
+  'é': 'e',
+  'ì': 'i',
+  'î': 'i',
+  'ï': 'i',
+  'í': 'i',
+  'ò': 'o',
+  'ô': 'o',
+  'ö': 'o',
+  'ó': 'o',
+  'õ': 'o',
+  'ù': 'u',
+  'û': 'u',
+  'ü': 'u',
+  'ú': 'u',
+  'ç': 'c',
+  'ñ': 'n',
 };
 
 /// Chaîne normalisée pour la recherche : minuscules, sans accents

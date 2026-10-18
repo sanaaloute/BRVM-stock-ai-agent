@@ -38,3 +38,7 @@ PyJWT==2.10.1
 faster-whisper==1.2.1
 SpeechRecognition==3.17.0
 pydub==0.25.1
+# SGI statement import (PDF/DOCX text extraction and multipart upload)
+pypdf==6.21.1
+python-docx==1.2.0
+python-multipart==0.0.32
