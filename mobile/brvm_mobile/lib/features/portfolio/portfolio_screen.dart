@@ -91,7 +91,7 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
             icon: const Icon(Icons.upload_file),
           ),
           IconButton(
-            tooltip: 'Ajouter une position',
+            tooltip: 'Ajouter une opération',
             onPressed: () => context.push('/portefeuille/form'),
             icon: const Icon(Icons.add),
           ),
@@ -238,73 +238,219 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final variation = summary.gainLossPct;
+    final colors = theme.colorScheme;
+    final total = summary.totalGainLossFcfa;
+    final totalColor = total == null || total == 0
+        ? colors.neutral
+        : (total > 0 ? colors.gain : colors.loss);
+    final latent = summary.gainLossFcfa;
+    final latentColor = latent == null || latent == 0
+        ? colors.neutral
+        : (latent > 0 ? colors.gain : colors.loss);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text('Valeur totale', style: theme.textTheme.titleSmall),
-            const SizedBox(height: 4),
-            PriceText(
-              summary.totalValueFcfa,
-              style: theme.textTheme.headlineSmall,
+    return TweenAnimationBuilder<double>(
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+      tween: Tween<double>(begin: 0, end: 1),
+      builder: (context, animation, child) {
+        return Opacity(
+          opacity: animation,
+          child: Transform.translate(
+            offset: Offset(0, 10 * (1 - animation)),
+            child: child,
+          ),
+        );
+      },
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: <Color>[
+                colors.primary.withValues(alpha: 0.14),
+                colors.surface,
+              ],
             ),
-            const SizedBox(height: 12),
-            _SummaryItem(
-              label: 'Coût d’achat',
-              value: formatFcfa(summary.totalCostFcfa),
-            ),
-            const SizedBox(height: 12),
-            _SummaryItem(
-              label: 'Gain/Perte',
-              value:
-                  '${formatSignedFcfa(summary.gainLossFcfa)} (${formatPercent(variation)})',
-            ),
-            const SizedBox(height: 12),
-            _SummaryItem(
-              label: 'Positions',
-              value: '${summary.positionsCount ?? '—'}',
-            ),
-          ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: colors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.account_balance_wallet_outlined,
+                      size: 20,
+                      color: colors.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Valeur actuelle',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        Text(
+                          'Valeur marchande de vos titres',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              PriceText(
+                summary.totalValueFcfa,
+                style: theme.textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: totalColor.withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: totalColor.withValues(alpha: 0.24)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            'Performance globale',
+                            style: theme.textTheme.labelLarge,
+                          ),
+                        ),
+                        VariationChip(summary.totalGainLossPct),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formatSignedFcfa(total),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: totalColor,
+                        fontWeight: FontWeight.bold,
+                        fontFeatures: const <FontFeature>[
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Dividendes + gain/perte latent(e)',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SummaryMetricRow(
+                icon: Icons.shopping_bag_outlined,
+                label: 'Coût d’achat',
+                value: formatFcfa(summary.totalCostFcfa),
+              ),
+              const SizedBox(height: 8),
+              _SummaryMetricRow(
+                icon: Icons.show_chart,
+                label: 'Gain/Perte latent(e)',
+                value:
+                    '${formatSignedFcfa(latent)} (${formatPercent(summary.gainLossPct)})',
+                color: latentColor,
+              ),
+              const SizedBox(height: 8),
+              _SummaryMetricRow(
+                icon: Icons.payments_outlined,
+                label: 'Dividendes perçus',
+                value: formatFcfa(summary.dividendsFcfa),
+                color: colors.tertiary,
+              ),
+              const SizedBox(height: 8),
+              _SummaryMetricRow(
+                icon: Icons.pie_chart_outline,
+                label: 'Positions',
+                value: '${summary.positionsCount ?? '—'}',
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _SummaryItem extends StatelessWidget {
-  const _SummaryItem({required this.label, this.value, this.chip})
-    : assert(value != null || chip != null, 'value ou chip requis');
+class _SummaryMetricRow extends StatelessWidget {
+  const _SummaryMetricRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.color,
+  });
 
+  final IconData icon;
   final String label;
-  final String? value;
-  final Widget? chip;
+  final String value;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.muted,
-          ),
+    final colors = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: 0.68),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.55),
         ),
-        const SizedBox(height: 4),
-        chip ??
-            Text(
-              value!,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 18, color: color ?? colors.muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(color: colors.muted),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: color ?? colors.onSurface,
+                fontWeight: FontWeight.w600,
                 fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
               ),
             ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -809,7 +955,9 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
   }
 }
 
-/// Formulaire d'ajout d'une ligne d'achat (lot).
+enum _PortfolioEntryType { purchase, dividend }
+
+/// Formulaire d'ajout d'un achat ou d'un dividende.
 class PositionFormScreen extends ConsumerStatefulWidget {
   const PositionFormScreen({super.key});
 
@@ -825,6 +973,7 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
   DateTime? _buyDate;
   bool _saving = false;
   String? _error;
+  _PortfolioEntryType _entryType = _PortfolioEntryType.purchase;
   String _sgi = 'Non affecté';
 
   @override
@@ -857,7 +1006,11 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_buyDate == null) {
-      setState(() => _error = 'Sélectionnez la date d’achat.');
+      setState(() {
+        _error = _entryType == _PortfolioEntryType.purchase
+            ? 'Sélectionnez la date d’achat.'
+            : 'Sélectionnez la date de paiement.';
+      });
       return;
     }
     setState(() {
@@ -865,15 +1018,18 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
       _saving = true;
     });
     final symbol = _symbolController.text.trim().toUpperCase();
-    final message = await ref
-        .read(portfolioProvider.notifier)
-        .addLot(
-          symbol,
-          double.parse(_priceController.text.replaceAll(',', '.')),
-          _buyDate!.toIso8601String().substring(0, 10),
-          double.parse(_quantityController.text.replaceAll(',', '.')),
-          sgi: _sgi,
-        );
+    final amount = double.parse(_priceController.text.replaceAll(',', '.'));
+    final entryDate = _buyDate!.toIso8601String().substring(0, 10);
+    final notifier = ref.read(portfolioProvider.notifier);
+    final message = _entryType == _PortfolioEntryType.purchase
+        ? await notifier.addLot(
+            symbol,
+            amount,
+            entryDate,
+            double.parse(_quantityController.text.replaceAll(',', '.')),
+            sgi: _sgi,
+          )
+        : await notifier.addDividend(symbol, amount, entryDate, sgi: _sgi);
     if (!mounted) return;
     setState(() => _saving = false);
     if (message == null) {
@@ -888,7 +1044,7 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
     final knownSymbols =
         ref.watch(palmaresSymbolsProvider).valueOrNull ?? const <String>[];
     return Scaffold(
-      appBar: const KoraAppBar(title: Text('Ajouter un achat')),
+      appBar: const KoraAppBar(title: Text('Ajouter au portefeuille')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -897,6 +1053,30 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
+                Text(
+                  'Type d’opération',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<_PortfolioEntryType>(
+                  segments: const <ButtonSegment<_PortfolioEntryType>>[
+                    ButtonSegment<_PortfolioEntryType>(
+                      value: _PortfolioEntryType.purchase,
+                      label: Text('Achat'),
+                      icon: Icon(Icons.shopping_cart_outlined),
+                    ),
+                    ButtonSegment<_PortfolioEntryType>(
+                      value: _PortfolioEntryType.dividend,
+                      label: Text('Dividende'),
+                      icon: Icon(Icons.payments_outlined),
+                    ),
+                  ],
+                  selected: <_PortfolioEntryType>{_entryType},
+                  onSelectionChanged: (selection) {
+                    setState(() => _entryType = selection.first);
+                  },
+                ),
+                const SizedBox(height: 16),
                 if (knownSymbols.isNotEmpty)
                   Autocomplete<String>(
                     optionsBuilder: (value) {
@@ -982,59 +1162,86 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                TextFormField(
-                  controller: _priceController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                if (_entryType == _PortfolioEntryType.purchase) ...<Widget>[
+                  TextFormField(
+                    controller: _priceController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Prix d’achat (FCFA)',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      final parsed = double.tryParse(
+                        (value ?? '').replaceAll(',', '.'),
+                      );
+                      if (parsed == null || parsed <= 0) {
+                        return 'Saisissez un prix valide.';
+                      }
+                      return null;
+                    },
                   ),
-                  inputFormatters: <TextInputFormatter>[
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'Prix d’achat (FCFA)',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _quantityController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Quantité',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      final parsed = double.tryParse(
+                        (value ?? '').replaceAll(',', '.'),
+                      );
+                      if (parsed == null || parsed <= 0) {
+                        return 'Saisissez une quantité valide.';
+                      }
+                      return null;
+                    },
                   ),
-                  validator: (value) {
-                    final parsed = double.tryParse(
-                      (value ?? '').replaceAll(',', '.'),
-                    );
-                    if (parsed == null || parsed <= 0) {
-                      return 'Saisissez un prix valide.';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _quantityController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                ] else ...<Widget>[
+                  TextFormField(
+                    controller: _priceController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Montant du dividende (FCFA)',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      final parsed = double.tryParse(
+                        (value ?? '').replaceAll(',', '.'),
+                      );
+                      if (parsed == null || parsed <= 0) {
+                        return 'Saisissez un montant valide.';
+                      }
+                      return null;
+                    },
                   ),
-                  inputFormatters: <TextInputFormatter>[
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'Quantité',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    final parsed = double.tryParse(
-                      (value ?? '').replaceAll(',', '.'),
-                    );
-                    if (parsed == null || parsed <= 0) {
-                      return 'Saisissez une quantité valide.';
-                    }
-                    return null;
-                  },
-                ),
+                ],
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   onPressed: _pickDate,
                   icon: const Icon(Icons.calendar_today),
                   label: Text(
                     _buyDate == null
-                        ? 'Date d’achat'
-                        : 'Date d’achat : ${_buyDate!.toIso8601String().substring(0, 10)}',
+                        ? (_entryType == _PortfolioEntryType.purchase
+                              ? 'Date d’achat'
+                              : 'Date de paiement')
+                        : '${_entryType == _PortfolioEntryType.purchase ? 'Date d’achat' : 'Date de paiement'} : ${_buyDate!.toIso8601String().substring(0, 10)}',
                   ),
                 ),
                 if (_error != null) FormError(message: _error!),
@@ -1047,7 +1254,11 @@ class _PositionFormScreenState extends ConsumerState<PositionFormScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Ajouter l’achat'),
+                      : Text(
+                          _entryType == _PortfolioEntryType.purchase
+                              ? 'Ajouter l’achat'
+                              : 'Ajouter le dividende',
+                        ),
                 ),
               ],
             ),

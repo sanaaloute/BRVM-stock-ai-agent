@@ -78,6 +78,9 @@ class PortfolioSummary {
     this.totalValueFcfa,
     this.gainLossFcfa,
     this.gainLossPct,
+    this.dividendsFcfa,
+    this.totalGainLossFcfa,
+    this.totalGainLossPct,
     this.positionsCount,
     this.lotsCount,
   });
@@ -88,6 +91,9 @@ class PortfolioSummary {
         totalValueFcfa: asDouble(json['total_value_fcfa']),
         gainLossFcfa: asDouble(json['gain_loss_fcfa']),
         gainLossPct: asDouble(json['gain_loss_pct']),
+        dividendsFcfa: asDouble(json['dividends_fcfa']),
+        totalGainLossFcfa: asDouble(json['total_gain_loss_fcfa']),
+        totalGainLossPct: asDouble(json['total_gain_loss_pct']),
         positionsCount: asInt(json['positions_count']),
         lotsCount: asInt(json['lots_count']),
       );
@@ -96,6 +102,9 @@ class PortfolioSummary {
   final double? totalValueFcfa;
   final double? gainLossFcfa;
   final double? gainLossPct;
+  final double? dividendsFcfa;
+  final double? totalGainLossFcfa;
+  final double? totalGainLossPct;
   final int? positionsCount;
   final int? lotsCount;
 }

@@ -102,6 +102,28 @@ class PortfolioRepository {
     }
   }
 
+  Future<String?> addDividend(
+    String symbol,
+    double amount,
+    String paymentDate, {
+    String? sgi,
+  }) async {
+    try {
+      await _api.post(
+        '${AppConfig.apiPrefix}/portfolio/dividends',
+        data: <String, dynamic>{
+          'symbol': symbol,
+          'amount': amount,
+          'payment_date': paymentDate,
+          if (sgi != null) ...{'sgi': sgi},
+        },
+      );
+      return null;
+    } on DioException catch (e) {
+      return dioDetailMessage(e) ?? 'Impossible d’enregistrer le dividende.';
+    }
+  }
+
   /// Modifie un lot existant. Retourne `null` si OK, sinon le message
   /// d'erreur (404 si le lot n'appartient pas à l'utilisateur).
   Future<String?> updateLot(
@@ -154,6 +176,11 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     return ref.watch(portfolioRepositoryProvider).get(sgi: sgi);
   }
 
+  void _refresh() {
+    ref.invalidateSelf();
+    ref.invalidate(portfolioHistoryProvider);
+  }
+
   Future<String?> addLot(
     String symbol,
     double buyPrice,
@@ -164,7 +191,20 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     final message = await ref
         .read(portfolioRepositoryProvider)
         .addLot(symbol, buyPrice, buyDate, quantity, sgi: sgi);
-    ref.invalidateSelf();
+    _refresh();
+    return message;
+  }
+
+  Future<String?> addDividend(
+    String symbol,
+    double amount,
+    String paymentDate, {
+    String? sgi,
+  }) async {
+    final message = await ref
+        .read(portfolioRepositoryProvider)
+        .addDividend(symbol, amount, paymentDate, sgi: sgi);
+    _refresh();
     return message;
   }
 
@@ -184,7 +224,7 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
           quantity: quantity,
           sgi: sgi,
         );
-    ref.invalidateSelf();
+    _refresh();
     return message;
   }
 
@@ -192,7 +232,7 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     try {
       await ref.read(portfolioRepositoryProvider).deleteLot(lotId);
     } finally {
-      ref.invalidateSelf();
+      _refresh();
     }
   }
 
@@ -200,7 +240,7 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
     try {
       await ref.read(portfolioRepositoryProvider).deleteSymbol(symbol);
     } finally {
-      ref.invalidateSelf();
+      _refresh();
     }
   }
 }

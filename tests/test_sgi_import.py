@@ -240,3 +240,48 @@ def test_parse_and_confirm_api(temp_db, monkeypatch):
     assert duplicate.status_code == 409
     assert user_db.portfolio_positions(USER_ID)[0]["quantity"] == 1
     assert user_db.portfolio_positions(OTHER_USER_ID) == []
+
+
+def test_manual_dividend_api_summary_and_history(temp_db, monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_app_user] = lambda: {"id": "user", "principal_id": USER_ID}
+    client = TestClient(app)
+    assert user_db.portfolio_add(
+        USER_ID, "NTLC", 50000, "2026-01-15", 10, sgi="PHOENIX CAPITAL MANAGEMENT"
+    )["ok"]
+    payment_date = (date.today() - timedelta(days=10)).isoformat()
+    response = client.post(
+        "/mobile/v1/portfolio/dividends",
+        json={
+            "symbol": "NTLC",
+            "amount": 1000,
+            "payment_date": payment_date,
+            "sgi": "PHOENIX CAPITAL MANAGEMENT",
+        },
+    )
+    assert response.status_code == 200, response.text
+    with db_engine.session_scope() as session:
+        row = session.execute(select(models.PortfolioDividend)).scalar_one()
+        assert row.import_id is None
+        assert row.amount == 1000
+
+    monkeypatch.setattr(user_db, "_current_price", lambda symbol: 60000.0)
+    summary = user_db.portfolio_summary(USER_ID)
+    assert summary["gain_loss_fcfa"] == 100000
+    assert summary["dividends_fcfa"] == 1000
+    assert summary["total_gain_loss_fcfa"] == 101000
+    assert summary["total_gain_loss_pct"] == 20.2
+    assert user_db.portfolio_summary(USER_ID, sgi="BSIC Capital SA")["dividends_fcfa"] == 0
+    assert user_db.portfolio_summary(OTHER_USER_ID)["dividends_fcfa"] == 0
+
+    today = date.today()
+    rows = [
+        {"date": today - timedelta(days=20), "price": 50000.0},
+        {"date": today - timedelta(days=10), "price": 55000.0},
+        {"date": today, "price": 60000.0},
+    ]
+    monkeypatch.setattr(user_db, "load_series", lambda *args, **kwargs: rows)
+    history = user_db.portfolio_history(USER_ID, 90)
+    assert history[-1]["dividends_fcfa"] == 1000
+    assert history[-1]["total_value_fcfa"] == 600000

@@ -348,8 +348,56 @@ def portfolio_with_prices(telegram_id: int, sgi: str | None = None) -> list[dict
     return rows
 
 
+def portfolio_dividend_add(telegram_id: int, symbol: str, amount: float, payment_date: str, sgi: str | None = None) -> dict[str, Any]:
+    """Record one manually entered dividend payment."""
+    get_or_create_user(telegram_id)
+    symbol = (symbol or "").strip().upper()
+    sgi_name = (sgi or "Non affecté").strip() or "Non affecté"
+    if symbol not in get_valid_symbols():
+        return {"ok": False, "error": f"{symbol} n'est pas un symbole BRVM coté."}
+    try:
+        payment_day = date.fromisoformat(payment_date.strip()[:10]).isoformat()
+        dividend_amount = float(amount)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Date ou montant de dividende invalide."}
+    if dividend_amount <= 0:
+        return {"ok": False, "error": "Le montant du dividende doit être positif."}
+    try:
+        with db_engine.session_scope() as s:
+            result = s.execute(
+                models.PortfolioDividend.__table__.insert().values(
+                    telegram_id=telegram_id,
+                    import_id=None,
+                    sgi=sgi_name,
+                    symbol=symbol,
+                    amount=dividend_amount,
+                    payment_date=payment_day,
+                )
+            )
+        dividend_id = result.inserted_primary_key[0] if result.inserted_primary_key else None
+        return {
+            "ok": True,
+            "id": dividend_id,
+            "message": f"Dividende enregistré : {symbol} : {dividend_amount:g} F CFA le {payment_day}.",
+        }
+    except SQLAlchemyError as e:
+        return {"ok": False, "error": str(e)}
+
+
+def portfolio_dividends_total(telegram_id: int, sgi: str | None = None) -> float:
+    """Total dividends received, optionally restricted to one SGI."""
+    stmt = select(func.sum(models.PortfolioDividend.amount)).where(
+        models.PortfolioDividend.telegram_id == telegram_id
+    )
+    if sgi is not None:
+        stmt = stmt.where(models.PortfolioDividend.sgi == sgi)
+    with db_engine.session_scope() as s:
+        value = s.execute(stmt).scalar_one()
+    return round(float(value or 0), 2)
+
+
 def portfolio_summary(telegram_id: int, sgi: str | None = None) -> dict[str, Any]:
-    """Total cost, total value, overall gain/loss amount and percent, optionally by SGI."""
+    """Current value, latent performance, dividends and total return, optionally by SGI."""
     rows = portfolio_with_prices(telegram_id, sgi=sgi)
     total_cost = sum(r["total_cost"] for r in rows)
     total_value = 0.0
@@ -359,14 +407,22 @@ def portfolio_summary(telegram_id: int, sgi: str | None = None) -> dict[str, Any
             total_value += p * r["quantity"]
         else:
             total_value += r["total_cost"]  # fallback to cost
+    gain_loss = round(total_value - total_cost, 2)
+    dividends = portfolio_dividends_total(telegram_id, sgi=sgi)
+    total_gain_loss = round(gain_loss + dividends, 2)
     gain_pct = None
+    total_gain_loss_pct = None
     if total_cost and total_value > 0:
-        gain_pct = round((total_value - total_cost) / total_cost * 100, 2)
+        gain_pct = round(gain_loss / total_cost * 100, 2)
+        total_gain_loss_pct = round(total_gain_loss / total_cost * 100, 2)
     return {
         "total_cost_fcfa": round(total_cost, 2),
         "total_value_fcfa": round(total_value, 2),
-        "gain_loss_fcfa": round(total_value - total_cost, 2),
+        "gain_loss_fcfa": gain_loss,
         "gain_loss_pct": gain_pct,
+        "dividends_fcfa": dividends,
+        "total_gain_loss_fcfa": total_gain_loss,
+        "total_gain_loss_pct": total_gain_loss_pct,
         "positions_count": len(rows),
         "lots_count": sum(len(r["lots"]) for r in rows),
     }
@@ -546,6 +602,12 @@ def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) 
                 models.PortfolioImport.telegram_id == telegram_id
             )
         ).scalars().all()
+        manual_dividends = s.execute(
+            select(models.PortfolioDividend).where(
+                models.PortfolioDividend.telegram_id == telegram_id,
+                models.PortfolioDividend.import_id.is_(None),
+            )
+        ).scalars().all()
     for raw in imports:
         try:
             transactions = json.loads(raw)
@@ -582,6 +644,18 @@ def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) 
             imported_events.append(event)
             if side == "buy":
                 imported_buy_signatures.add((symbol, day.isoformat(), price, broker))
+
+    for row in manual_dividends:
+        try:
+            payment_day = date.fromisoformat(row.payment_date[:10])
+        except (TypeError, ValueError):
+            continue
+        dividend_events.append({
+            "date": payment_day,
+            "symbol": row.symbol,
+            "amount": float(row.amount),
+            "sgi": row.sgi or "Non affecté",
+        })
 
     manual_buy_events = []
     for lot in portfolio_list(telegram_id):

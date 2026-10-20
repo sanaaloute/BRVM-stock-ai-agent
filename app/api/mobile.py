@@ -393,6 +393,24 @@ def portfolio_add(body: HoldingBody, user: dict = Depends(require_app_user)) -> 
     return result
 
 
+class DividendBody(BaseModel):
+    symbol: str = Field(min_length=1, max_length=12)
+    amount: float = Field(gt=0)
+    payment_date: str = Field(min_length=8, max_length=10)
+    sgi: str | None = None
+
+
+@router.post("/portfolio/dividends")
+def portfolio_dividend_add(body: DividendBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Record one manually entered dividend payment."""
+    result = user_db.portfolio_dividend_add(
+        _principal(user), body.symbol, body.amount, body.payment_date, sgi=body.sgi
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
 class SgiImportConfirmBody(BaseModel):
     content_hash: str = Field(min_length=64, max_length=64)
     transactions: list[sgi_import.SgiTransaction]

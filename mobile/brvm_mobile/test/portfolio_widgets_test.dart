@@ -27,6 +27,9 @@ class _FakeRepository extends PortfolioRepository {
         totalValueFcfa: 191100,
         gainLossFcfa: -468900,
         gainLossPct: -71.05,
+        dividendsFcfa: 1000,
+        totalGainLossFcfa: -467900,
+        totalGainLossPct: -70.89,
         positionsCount: 2,
         lotsCount: 2,
       ),
@@ -213,19 +216,24 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Valeur totale'), findsOneWidget);
+    expect(find.text('Valeur actuelle'), findsOneWidget);
+    expect(find.text('Performance globale'), findsOneWidget);
     expect(find.text('Évolution du portefeuille'), findsOneWidget);
     expect(find.byTooltip('Importer un document SGI'), findsOneWidget);
-    expect(find.byTooltip('Ajouter une position'), findsOneWidget);
+    expect(find.byTooltip('Ajouter une opération'), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsNothing);
 
-    final totalY = tester.getTopLeft(find.text('Valeur totale')).dy;
+    final totalY = tester.getTopLeft(find.text('Valeur actuelle')).dy;
+    final performanceY = tester.getTopLeft(find.text('Performance globale')).dy;
     final costY = tester.getTopLeft(find.text('Coût d’achat')).dy;
-    final gainY = tester.getTopLeft(find.text('Gain/Perte').first).dy;
+    final latentY = tester.getTopLeft(find.text('Gain/Perte latent(e)')).dy;
+    final dividendsY = tester.getTopLeft(find.text('Dividendes perçus')).dy;
     final positionsY = tester.getTopLeft(find.text('Positions').first).dy;
-    expect(costY, greaterThan(totalY));
-    expect(gainY, greaterThan(costY));
-    expect(positionsY, greaterThan(gainY));
+    expect(performanceY, greaterThan(totalY));
+    expect(costY, greaterThan(performanceY));
+    expect(latentY, greaterThan(costY));
+    expect(dividendsY, greaterThan(latentY));
+    expect(positionsY, greaterThan(dividendsY));
     expect(tester.takeException(), isNull);
   });
 
@@ -272,6 +280,35 @@ void main() {
     expect(find.text('AIA'), findsOneWidget);
     expect(find.text('ALPHA INVESTMENT'), findsNothing);
     expect(find.text('PCMDRO'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('position form switches to dividend entry', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          brokersProvider.overrideWith((ref) async => <BrokerEntry>[]),
+        ],
+        child: const MaterialApp(home: PositionFormScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Prix d’achat (FCFA)'), findsOneWidget);
+    expect(find.text('Quantité'), findsOneWidget);
+
+    await tester.tap(find.text('Dividende'));
+    await tester.pumpAndSettle();
+    expect(find.text('Montant du dividende (FCFA)'), findsOneWidget);
+    expect(find.text('Date de paiement'), findsOneWidget);
+    expect(find.text('Ajouter le dividende'), findsOneWidget);
+    expect(find.text('Prix d’achat (FCFA)'), findsNothing);
+    expect(find.text('Quantité'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

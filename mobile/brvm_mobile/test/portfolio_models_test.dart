@@ -110,6 +110,9 @@ void main() {
           'total_value_fcfa': 112000.0,
           'gain_loss_fcfa': 12000.0,
           'gain_loss_pct': 12.0,
+          'dividends_fcfa': 2000.0,
+          'total_gain_loss_fcfa': 14000.0,
+          'total_gain_loss_pct': 14.0,
         },
         'positions': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -122,6 +125,9 @@ void main() {
         ],
       });
       expect(data.summary.gainLossFcfa, 12000.0);
+      expect(data.summary.dividendsFcfa, 2000.0);
+      expect(data.summary.totalGainLossFcfa, 14000.0);
+      expect(data.summary.totalGainLossPct, 14.0);
       expect(data.positions.single.currentValueFcfa, 112000.0);
       expect(data.positions.single.gainLossFcfa, 12000.0);
 
