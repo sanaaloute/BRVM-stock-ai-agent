@@ -6,7 +6,10 @@ import pytest
 from sqlalchemy import create_engine, select
 
 from app.db.models import AppUser, Base, Portfolio, User
-from scripts.migrate_sqlite_to_postgres import import_user_data
+from scripts.migrate_sqlite_to_postgres import (
+    _readonly_sqlite_engine,
+    import_user_data,
+)
 
 
 def _database(path):
@@ -61,6 +64,22 @@ def test_import_preserves_app_accounts_and_portfolio_and_is_idempotent(tmp_path)
     assert repeated["app_users"] == 0
     assert repeated["app_users (already identical)"] == 1
 
+    source.dispose()
+    target.dispose()
+
+
+def test_import_source_opens_read_only_sqlite_database(tmp_path):
+    source_path = tmp_path / "source.db"
+    writable_source = _database(source_path)
+    with writable_source.begin() as connection:
+        connection.execute(User.__table__.insert().values(telegram_id=789))
+    writable_source.dispose()
+
+    source = _readonly_sqlite_engine(source_path)
+    target = _database(tmp_path / "target.db")
+    with target.begin() as connection:
+        result = import_user_data(source, connection)
+    assert result["users"] == 1
     source.dispose()
     target.dispose()
 

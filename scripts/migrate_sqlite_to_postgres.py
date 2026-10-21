@@ -53,6 +53,12 @@ def _source_table(engine: Engine, name: str) -> Table:
     return Table(name, MetaData(), autoload_with=engine)
 
 
+def _readonly_sqlite_engine(path: Path) -> Engine:
+    return create_engine(
+        f"sqlite:///file:{path.resolve()}?mode=ro&immutable=1&uri=true"
+    )
+
+
 def _target_values(table: Table, source_row: Any) -> dict[str, Any]:
     source_values = dict(source_row)
     values = {
@@ -176,7 +182,7 @@ def main() -> None:
     if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
         parser.error("DATABASE_URL must point to the PostgreSQL target database.")
 
-    source_engine = create_engine(f"sqlite:///{args.source.resolve()}")
+    source_engine = _readonly_sqlite_engine(args.source)
     target_engine = create_engine(database_url.replace("postgresql://", "postgresql+psycopg://", 1))
     try:
         with target_engine.connect() as target_connection:
