@@ -27,7 +27,7 @@ Toute l'interface est en **français**.
 ## Prérequis
 
 - Flutter 3.35+ / Dart 3.12+ (`flutter --version`).
-- En production, l'application parle à la passerelle `https://api.korabourse.com` (défaut, aucune configuration).
+- En production, l'application parle à la passerelle `https://kbourse.neobytech.net` (défaut, aucune configuration).
 - En développement/test : lancer le backend localement puis pointer l'app dessus.
 
 ## Configuration

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild the application images and apply code or .env changes to the stack.
+# Rebuild the application image and apply code or .env changes to the stack.
 set -euo pipefail
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
@@ -14,7 +14,7 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 if [[ ! -f .env ]]; then
-  echo "[update] ERROR: .env is missing. Copy .env.example and configure it first." >&2
+  echo "[update] ERROR: .env is missing. Copy .env.example to .env and configure it first." >&2
   exit 1
 fi
 
@@ -36,7 +36,7 @@ echo "[update] validating Docker Compose configuration for $DOCKER_DEFAULT_PLATF
 docker compose config --quiet
 
 UV_DEFAULT_INDEX="${UV_DEFAULT_INDEX:-https://mirrors.aliyun.com/pypi/simple/}"
-echo "[update] rebuilding the shared api/bot application image..."
+echo "[update] rebuilding the application image..."
 docker compose build --build-arg "UV_DEFAULT_INDEX=$UV_DEFAULT_INDEX" api
 
 IMAGE_PLATFORM="$(docker image inspect realtimestock-bot:latest --format '{{.Os}}/{{.Architecture}}')"

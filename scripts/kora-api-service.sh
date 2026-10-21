@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Foreground wrapper for the Kora Bourse mobile API, kept alive by launchd
-# (net.neobytech.kbourse.api). Same env as scripts/dev-up.sh.
+# (net.neobytech.kbourse.api). Native local API configuration for the MiniMac.
 set -u
 cd "$(dirname "$0")/.."
 
