@@ -186,6 +186,33 @@ class LoadingView extends StatelessWidget {
   }
 }
 
+String _userFacingError(String message) {
+  final technicalError = RegExp(
+    r'DioException|SocketException|HandshakeException|HttpException|<!doctype html|<html|Cloudflare',
+    caseSensitive: false,
+  ).firstMatch(message);
+  if (technicalError == null) return message;
+
+  final context = message.substring(0, technicalError.start).trim();
+  final technicalDetails = message
+      .substring(technicalError.start)
+      .toLowerCase();
+  final friendlyMessage =
+      technicalDetails.contains('failed host lookup') ||
+          technicalDetails.contains('socketexception') ||
+          technicalDetails.contains('connection error')
+      ? 'Connexion impossible. Vérifiez votre connexion puis réessayez.'
+      : technicalDetails.contains('timeout') ||
+            technicalDetails.contains('timed out') ||
+            RegExp(r'\b(502|503|504|520|524)\b').hasMatch(technicalDetails) ||
+            technicalDetails.contains('cloudflare') ||
+            technicalDetails.contains('<html')
+      ? 'Service temporairement indisponible. Réessayez dans quelques instants.'
+      : 'Une erreur est survenue. Veuillez réessayer.';
+
+  return context.isEmpty ? friendlyMessage : '$context\n$friendlyMessage';
+}
+
 /// Vue d'erreur avec bouton « Réessayer ».
 class ErrorView extends StatelessWidget {
   const ErrorView({super.key, required this.message, this.onRetry});
@@ -217,7 +244,7 @@ class ErrorView extends StatelessWidget {
                   Icon(Icons.cloud_off_outlined, size: 48, color: colors.error),
                   const SizedBox(height: 12),
                   Text(
-                    message,
+                    _userFacingError(message),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
