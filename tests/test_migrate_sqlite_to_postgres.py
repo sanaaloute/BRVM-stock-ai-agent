@@ -112,7 +112,7 @@ def test_import_creates_missing_user_row_for_app_account(tmp_path):
 
     with target.begin() as connection:
         result = import_user_data(source, connection)
-    assert result["users (created for app accounts)"] == 1
+    assert result["users (created for referenced IDs)"] == 1
 
     with target.connect() as connection:
         assert connection.execute(
@@ -124,7 +124,37 @@ def test_import_creates_missing_user_row_for_app_account(tmp_path):
 
     with target.begin() as connection:
         repeated = import_user_data(source, connection)
-    assert repeated["users (created for app accounts)"] == 0
+    assert repeated["users (created for referenced IDs)"] == 0
+
+    source.dispose()
+    target.dispose()
+
+
+def test_import_creates_parent_for_orphan_portfolio_import(tmp_path):
+    source = _database(tmp_path / "source.db")
+    target = _database(tmp_path / "target.db")
+    missing_user_id = -2004400736916
+
+    with source.begin() as connection:
+        connection.execute(
+            PortfolioImport.__table__.insert().values(
+                telegram_id=missing_user_id,
+                content_hash="orphan-import",
+                transactions_json="[]",
+            )
+        )
+
+    with target.begin() as connection:
+        result = import_user_data(source, connection)
+    assert result["users (created for referenced IDs)"] == 1
+
+    with target.connect() as connection:
+        assert connection.execute(
+            select(User.telegram_id).where(User.telegram_id == missing_user_id)
+        ).scalar_one() == missing_user_id
+        assert connection.execute(
+            select(PortfolioImport.telegram_id)
+        ).scalar_one() == missing_user_id
 
     source.dispose()
     target.dispose()

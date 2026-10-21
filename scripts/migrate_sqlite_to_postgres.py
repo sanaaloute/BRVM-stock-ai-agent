@@ -114,28 +114,48 @@ def _sync_postgres_sequence(connection: Connection, table: Table) -> None:
     )
 
 
-def _ensure_app_principal_users(
+def _ensure_referenced_users(
     source_connection: Connection,
     target_connection: Connection,
     source_names: set[str],
 ) -> int:
-    """Ensure every imported app account has its legacy user/FK identity row."""
-    if "app_users" not in source_names:
-        return 0
-
-    source_app_users = _source_table(source_connection.engine, "app_users")
+    """Ensure imported accounts and user-owned rows have their users FK rows."""
     source_user_table = _source_table(source_connection.engine, "users")
     target_user_table = Base.metadata.tables["users"]
-    imported_ids = set(
-        source_connection.execute(
-            select(source_app_users.c.principal_id)
-        ).scalars()
-    )
-    source_ids = set(source_connection.execute(select(source_user_table.c.telegram_id)).scalars())
-    missing_ids = imported_ids - source_ids
+
+    referenced_ids: set[int] = set()
+    if "app_users" in source_names:
+        source_app_users = _source_table(source_connection.engine, "app_users")
+        referenced_ids.update(
+            source_connection.execute(
+                select(source_app_users.c.principal_id)
+            ).scalars()
+        )
+
+    for name in USER_DATA_TABLES:
+        if name not in source_names or name == "users":
+            continue
+        target_table = Base.metadata.tables[name]
+        references_users = any(
+            foreign_key.column.table.name == "users"
+            and foreign_key.column.name == "telegram_id"
+            for foreign_key in target_table.foreign_keys
+        )
+        if not references_users:
+            continue
+
+        source_table = _source_table(source_connection.engine, name)
+        if "telegram_id" in source_table.c:
+            referenced_ids.update(
+                source_connection.execute(
+                    select(source_table.c.telegram_id).where(
+                        source_table.c.telegram_id.is_not(None)
+                    )
+                ).scalars()
+            )
 
     created = 0
-    for principal_id in missing_ids:
+    for principal_id in referenced_ids:
         existing = target_connection.execute(
             select(target_user_table.c.telegram_id).where(
                 target_user_table.c.telegram_id == principal_id
@@ -201,11 +221,11 @@ def import_user_data(
             results[name] = inserted
             results[f"{name} (already identical)"] = unchanged
 
-            if name == "app_users":
-                created_users = _ensure_app_principal_users(
+            if name == "users":
+                created_users = _ensure_referenced_users(
                     source_connection, target_connection, source_names
                 )
-                results["users (created for app accounts)"] = created_users
+                results["users (created for referenced IDs)"] = created_users
                 if sync_sequences and created_users:
                     _sync_postgres_sequence(
                         target_connection, Base.metadata.tables["users"]
