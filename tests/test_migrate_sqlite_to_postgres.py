@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 
 from app.db.models import AppUser, Base, Portfolio, User
+import scripts.migrate_sqlite_to_postgres as migration
 from scripts.migrate_sqlite_to_postgres import (
     _readonly_sqlite_engine,
     _sync_postgres_sequence,
@@ -101,6 +102,24 @@ def test_postgres_sequence_sync_never_sets_negative_ids():
 
     assert "GREATEST(COALESCE(MAX(telegram_id), 1), 1)" in connection.statement
     assert "COALESCE(MAX(telegram_id), 0) >= 1" in connection.statement
+
+
+def test_dry_run_skips_sequence_sync(tmp_path, monkeypatch):
+    source = _database(tmp_path / "source.db")
+    target = _database(tmp_path / "target.db")
+    with source.begin() as connection:
+        connection.execute(User.__table__.insert().values(telegram_id=-123))
+
+    def unexpected_sequence_sync(*_args):
+        raise AssertionError("dry run must not change PostgreSQL sequences")
+
+    monkeypatch.setattr(migration, "_sync_postgres_sequence", unexpected_sequence_sync)
+    with target.begin() as connection:
+        result = import_user_data(source, connection, sync_sequences=False)
+    assert result["users"] == 1
+
+    source.dispose()
+    target.dispose()
 
 
 def test_import_refuses_to_overwrite_conflicting_target_rows(tmp_path):

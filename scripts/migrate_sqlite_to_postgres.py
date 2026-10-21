@@ -114,7 +114,12 @@ def _sync_postgres_sequence(connection: Connection, table: Table) -> None:
     )
 
 
-def import_user_data(source_engine: Engine, target_connection: Connection) -> dict[str, int]:
+def import_user_data(
+    source_engine: Engine,
+    target_connection: Connection,
+    *,
+    sync_sequences: bool = True,
+) -> dict[str, int]:
     """Import source rows transactionally; return inserted and unchanged counts."""
     source_names = set(inspect(source_engine).get_table_names())
     results: dict[str, int] = {}
@@ -156,7 +161,8 @@ def import_user_data(source_engine: Engine, target_connection: Connection) -> di
                 target_connection.execute(target_table.insert().values(**values))
                 inserted += 1
 
-            _sync_postgres_sequence(target_connection, target_table)
+            if sync_sequences:
+                _sync_postgres_sequence(target_connection, target_table)
             results[name] = inserted
             results[f"{name} (already identical)"] = unchanged
 
@@ -187,7 +193,9 @@ def main() -> None:
     try:
         with target_engine.connect() as target_connection:
             transaction = target_connection.begin()
-            result = import_user_data(source_engine, target_connection)
+            result = import_user_data(
+                source_engine, target_connection, sync_sequences=args.apply
+            )
             if args.apply:
                 transaction.commit()
                 print("Import committed.")
