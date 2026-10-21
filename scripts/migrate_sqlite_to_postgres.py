@@ -107,8 +107,8 @@ def _sync_postgres_sequence(connection: Connection, table: Table) -> None:
         text(
             "SELECT setval("
             "pg_get_serial_sequence(:table_name, :column_name), "
-            f"COALESCE(MAX({column_name}), 1), "
-            f"MAX({column_name}) IS NOT NULL) FROM {table_name}"
+            f"GREATEST(COALESCE(MAX({column_name}), 1), 1), "
+            f"COALESCE(MAX({column_name}), 0) >= 1) FROM {table_name}"
         ),
         {"table_name": table.name, "column_name": column.name},
     )

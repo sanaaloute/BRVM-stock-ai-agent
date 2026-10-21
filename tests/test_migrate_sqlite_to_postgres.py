@@ -4,10 +4,12 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.dialects import postgresql
 
 from app.db.models import AppUser, Base, Portfolio, User
 from scripts.migrate_sqlite_to_postgres import (
     _readonly_sqlite_engine,
+    _sync_postgres_sequence,
     import_user_data,
 )
 
@@ -82,6 +84,23 @@ def test_import_source_opens_read_only_sqlite_database(tmp_path):
     assert result["users"] == 1
     source.dispose()
     target.dispose()
+
+
+def test_postgres_sequence_sync_never_sets_negative_ids():
+    class FakeConnection:
+        dialect = postgresql.dialect()
+
+        def __init__(self):
+            self.statement = None
+
+        def execute(self, statement, parameters):
+            self.statement = str(statement)
+
+    connection = FakeConnection()
+    _sync_postgres_sequence(connection, User.__table__)
+
+    assert "GREATEST(COALESCE(MAX(telegram_id), 1), 1)" in connection.statement
+    assert "COALESCE(MAX(telegram_id), 0) >= 1" in connection.statement
 
 
 def test_import_refuses_to_overwrite_conflicting_target_rows(tmp_path):
