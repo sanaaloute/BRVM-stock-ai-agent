@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 
-from app.db.models import AppUser, Base, Portfolio, User
+from app.db.models import AppUser, Base, Portfolio, PortfolioImport, User
 import scripts.migrate_sqlite_to_postgres as migration
 from scripts.migrate_sqlite_to_postgres import (
     _readonly_sqlite_engine,
@@ -83,6 +83,49 @@ def test_import_source_opens_read_only_sqlite_database(tmp_path):
     with target.begin() as connection:
         result = import_user_data(source, connection)
     assert result["users"] == 1
+    source.dispose()
+    target.dispose()
+
+
+def test_import_creates_missing_user_row_for_app_account(tmp_path):
+    source = _database(tmp_path / "source.db")
+    target = _database(tmp_path / "target.db")
+    app_user_id = uuid.uuid4()
+    principal_id = -2004400736916
+
+    with source.begin() as connection:
+        connection.execute(
+            AppUser.__table__.insert().values(
+                id=app_user_id,
+                principal_id=principal_id,
+                email="account@example.com",
+                password_hash="password-hash",
+            )
+        )
+        connection.execute(
+            PortfolioImport.__table__.insert().values(
+                telegram_id=principal_id,
+                content_hash="import-hash",
+                transactions_json="[]",
+            )
+        )
+
+    with target.begin() as connection:
+        result = import_user_data(source, connection)
+    assert result["users (created for app accounts)"] == 1
+
+    with target.connect() as connection:
+        assert connection.execute(
+            select(User.telegram_id).where(User.telegram_id == principal_id)
+        ).scalar_one() == principal_id
+        assert connection.execute(
+            select(PortfolioImport.telegram_id)
+        ).scalar_one() == principal_id
+
+    with target.begin() as connection:
+        repeated = import_user_data(source, connection)
+    assert repeated["users (created for app accounts)"] == 0
+
     source.dispose()
     target.dispose()
 

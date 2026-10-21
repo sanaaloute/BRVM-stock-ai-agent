@@ -108,8 +108,10 @@ active login sessions. Users will log in again on the server.
    ```
 
 The importer preserves source IDs, skips rows that already match exactly, and
-rolls back rather than overwriting conflicting target rows. Keep both backups
-until you have verified that users can log in and their portfolios are present.
+rolls back rather than overwriting conflicting target rows. It also creates a
+missing legacy `users` identity row for an imported app account when needed by
+portfolio foreign keys. Keep both backups until you have verified that users
+can log in and their portfolios are present.
 
 ## Mobile app
 
