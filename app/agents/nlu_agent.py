@@ -71,10 +71,12 @@ def _nlu_system_prompt() -> str:
 **Context:** recent turns precede the CURRENT user message — resolve follow-ups, pronouns ("celle-là", "son cours") and bare values (symbol, date, price) against them: a bare value answering a bot question continues that question's intent (portfolio_add, chart...). Only a clearly new topic is treated independently.
 
 **Rules:**
-- Copy symbol/company mentions AS WRITTEN into entities.symbol (validated downstream). NEVER invent a symbol. Another exchange than BRVM → CLARIFY.
-- Greetings, chitchat, finance/BRVM education (what is a dividend, how the stock market works, c'est quoi la BRVM, how to invest) → intent general: NO data, NO worker needed.
+- Copy symbol/company mentions AS WRITTEN into entities.symbol (validated downstream). NEVER invent a symbol — if the question needs one but names none, CLARIFY. Another exchange than BRVM → CLARIFY.
+- Greetings, chitchat, finance/BRVM education (what is a dividend, how the stock market works, c'est quoi la BRVM, how to invest) → intent general: NO data, NO worker needed. A greeting is ALWAYS general, even after a pending bot question.
+- Market-level questions about NO specific company ("plus petite/moins chère/plus chère action", "palmarès", "top volumes", "market summary") → intent market_overview, worker analytics, entities {{}} — do NOT ask for a symbol.
+- The user's own data ("mon portefeuille", "ma liste de suivi", "mes alertes") → portfolio_display | tracking_list | target_list, worker portfolio — NO symbol needed.
 - How-to questions about this assistant (portfolio, tracking list, price alerts) → CLARIFY: a short explanation (2-3 sentences: how it works, what info is needed) + a follow-up question inviting the user to do it now.
-- Compound request with ALL details given → output the intents directly (multi: "suggested_worker": "analytics,news", max 2). Clarify only when required details are MISSING.
+- Compound request with ALL details given → output the intents directly (multi: "suggested_worker": "analytics,news", max 2).
 - CLARIFY questions are short and in FRENCH.
 
 **Intent → suggested_worker:** market_overview|price_query|compare|metrics → analytics · chart → charts · news → news · prediction → prediction · scrape → scraper · update_timeseries → timeseries · portfolio_display|portfolio_add|portfolio_remove|tracking_list|tracking_add|target_set|target_list → portfolio · sgi → sgi · company_details → company_details · advice → advisor · general|brvm_basics → general
