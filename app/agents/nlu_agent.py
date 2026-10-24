@@ -189,6 +189,10 @@ def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None
                     except json.JSONDecodeError:
                         pass
                     break
+    # Bare label output ("general", "FINISH") — some models answer with just
+    # the route instead of the JSON object.
+    if _resolve_worker(text) == "general" or text.strip().upper() == "FINISH":
+        return {"intent": "general", "entities": {}, "suggested_worker": "general"}, None
     # CLARIFY anywhere (models often prefix it, e.g. "A) CLARIFY: ..." or
     # "unclear → CLARIFY: ..."). Junk/empty clarifications fall through.
     m = _CLARIFY_RE.search(text)

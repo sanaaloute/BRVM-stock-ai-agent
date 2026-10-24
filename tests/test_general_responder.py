@@ -86,6 +86,10 @@ def test_parser_tolerates_label_prefixes_and_junk():
     sd, clar = _parse_nlu_response('B) {"intent": "price_query", "entities": {"symbol": "NTLC"}, "suggested_worker": "analytics"}')
     assert clar is None and sd["suggested_worker"] == "analytics", (sd, clar)
 
+    # Bare route label instead of JSON (observed live: model answers 'general').
+    sd, clar = _parse_nlu_response("general")
+    assert clar is None and sd["suggested_worker"] == "general", (sd, clar)
+
 
 def test_company_name_resolved_in_code_not_prompt():
     from app.agents.nlu_agent import _parse_nlu_response
