@@ -43,7 +43,7 @@ def test_afrikia_defaults():
         "api_key": None,
         "base_url": "https://afrikia.neobytech.net/v1",
         "model": "nemotron-3-nano",
-        "fallback_models": "qwen2.5-7b",
+        "fallback_models": "gemma4-e4b",
         "llm_model": None,
     }
 
