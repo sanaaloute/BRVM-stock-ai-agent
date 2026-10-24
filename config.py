@@ -149,8 +149,9 @@ AFRIKIA_BASE_URL = os.getenv("AFRIKIA_BASE_URL", "https://afrikia.neobytech.net/
 AFRIKIA_MODEL = os.getenv("AFRIKIA_MODEL", "nemotron-3-nano").strip() or "nemotron-3-nano"
 
 # Fallback models tried in order (same provider, same key) when the primary
-# model's upstream is down.
-AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "qwen2.5-7b").strip()
+# model's upstream is down. gemma4-e4b measured fastest and most obedient to
+# the routing format (qwen2.5-7b misclassified greetings into clarify loops).
+AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "gemma4-e4b").strip()
 
 # Optional: override the model for every agent (wins over AFRIKIA_MODEL).
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip() or None
