@@ -13,31 +13,20 @@ RUN test "${TARGETOS}" = "linux" \
     && test "${TARGETARCH}" = "$(dpkg --print-architecture)" \
     && echo "Verified build target and userland: ${TARGETOS}/${TARGETARCH}"
 
-# System dependencies and the Python environment change less often than the app,
-# so keep their layers ahead of the application source for code-only rebuilds.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
-
+# Python dependencies change less often than the application source, so keep
+# their layer ahead of the COPY lines below for fast code-only rebuilds.
 COPY requirements-docker.txt .
 ARG UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --default-index "${UV_DEFAULT_INDEX}" -r requirements-docker.txt
 
-ARG WHISPER_MODEL=small
-ENV WHISPER_MODEL=${WHISPER_MODEL}
-ENV HF_HOME=/app/.cache/huggingface
-ENV HF_ENDPOINT=https://hf-mirror.com
-ENV HF_HUB_DISABLE_XET=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 RUN useradd --create-home --shell /bin/bash bot \
-    && mkdir -p /app/app/data/series /app/.cache/huggingface \
+    && mkdir -p /app/app/data/series \
     && chown -R bot:bot /app
 USER bot
-
-# Bake the Whisper model into the image as the runtime user. This layer remains
-# valid when only application source changes.
-RUN python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8')"
 
 COPY --chown=bot:bot config.py .
 COPY --chown=bot:bot scripts ./scripts
@@ -46,4 +35,4 @@ COPY --chown=bot:bot --chmod=755 entrypoint.sh .
 COPY --chown=bot:bot app app/
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["python", "-m", "scripts.run_telegram_bot"]
+CMD ["python", "-m", "scripts.run_api"]

@@ -289,8 +289,8 @@ def test_fresh_reply_guard_rejects_model_junk():
     assert _extract_fresh_reply(msgs, len(base)) is None
 
 
-# --- g. LLM provider fallback: retry on second provider when primary is down ---
-def test_llm_fallback_provider_kicks_in():
+# --- g. LLM model fallback: retry on a fallback model when primary is down ---
+def test_llm_fallback_model_kicks_in():
     import httpx
     from langchain_core.messages import AIMessage, HumanMessage
 
@@ -314,27 +314,26 @@ def test_llm_fallback_provider_kicks_in():
             return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse de secours")]}
 
     calls = {"n": 0}
+    compiled_models = []
 
     def _fake_compile(**kwargs):
         calls["n"] += 1
+        compiled_models.append(kwargs.get("model"))
         return _PrimaryGraph() if calls["n"] == 1 else _FallbackGraph()
 
     real_compile = g.get_compiled_graph
-    saved = (
-        config.LLM_PROVIDER,
-        getattr(config, "LLM_FALLBACK_PROVIDER", ""),
-        getattr(config, "LLM_FALLBACK_PROVIDERS", ""),
-    )
+    saved = (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL)
     g.get_compiled_graph = _fake_compile
-    config.LLM_PROVIDER = "openrouter"
-    config.LLM_FALLBACK_PROVIDER = "ollama"
-    config.LLM_FALLBACK_PROVIDERS = ""
+    config.LLM_MODEL = None
+    config.AFRIKIA_MODEL = "gpt-oss-20b"
+    config.AFRIKIA_FALLBACK_MODELS = "nemotron-3-nano"
     try:
         res = g.run_agent(query="test", thread_id="fallback-test")
         assert res.get("_fresh_reply") == "réponse de secours", res.get("_fresh_reply")
         assert calls["n"] == 2, calls  # primary graph + fallback graph compiled
+        assert compiled_models == ["gpt-oss-20b", "nemotron-3-nano"], compiled_models
         # Without a fallback configured, the retryable error must propagate
-        config.LLM_FALLBACK_PROVIDER = ""
+        config.AFRIKIA_FALLBACK_MODELS = ""
         calls["n"] = 0
         try:
             g.run_agent(query="test", thread_id="fallback-test-2")
@@ -343,10 +342,10 @@ def test_llm_fallback_provider_kicks_in():
             pass
     finally:
         g.get_compiled_graph = real_compile
-        (config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER, config.LLM_FALLBACK_PROVIDERS) = saved
+        (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL) = saved
 
 
-# --- h. Fallback CHAIN: primary -> fallback1 (fails) -> fallback2 (wins) -------
+# --- h. Fallback model CHAIN: primary -> fallback1 (fails) -> fallback2 (wins) ---
 def test_llm_fallback_chain_order():
     import httpx
     from langchain_core.messages import AIMessage, HumanMessage
@@ -368,74 +367,77 @@ def test_llm_fallback_chain_order():
 
     class _OkGraph(_FailGraph):
         def invoke(self, *a, **k):
-            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse openrouter")]}
+            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse qwen2.5-7b")]}
 
-    # compile #1 = primary (fails twice), #2 = tokenfree (fails once), #3 = openrouter (wins)
+    # compile #1 = primary (fails twice), #2 = nemotron-3-nano (fails once),
+    # #3 = qwen2.5-7b (wins)
     graphs = [_FailGraph(), _FailGraph(), _OkGraph()]
     calls = {"n": 0}
+    compiled_models = []
 
     def _fake_compile(**kwargs):
+        compiled_models.append(kwargs.get("model"))
         g_ = graphs[min(calls["n"], len(graphs) - 1)]
         calls["n"] += 1
         return g_
 
     real_compile = g.get_compiled_graph
-    saved = (
-        config.LLM_PROVIDER,
-        getattr(config, "LLM_FALLBACK_PROVIDER", ""),
-        getattr(config, "LLM_FALLBACK_PROVIDERS", ""),
-    )
+    saved = (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL)
     g.get_compiled_graph = _fake_compile
-    config.LLM_PROVIDER = "ollama"
-    config.LLM_FALLBACK_PROVIDER = ""
-    config.LLM_FALLBACK_PROVIDERS = "tokenfree,openrouter"
+    config.LLM_MODEL = None
+    config.AFRIKIA_MODEL = "gpt-oss-20b"
+    config.AFRIKIA_FALLBACK_MODELS = "nemotron-3-nano,qwen2.5-7b"
     try:
         res = g.run_agent(query="test", thread_id="chain-test")
-        assert res.get("_fresh_reply") == "réponse openrouter", res.get("_fresh_reply")
+        assert res.get("_fresh_reply") == "réponse qwen2.5-7b", res.get("_fresh_reply")
         assert calls["n"] == 3, calls
+        assert compiled_models == ["gpt-oss-20b", "nemotron-3-nano", "qwen2.5-7b"], compiled_models
 
         # An UNCONFIGURED middle fallback (ValueError, e.g. missing API key)
         # must be skipped — not block the rest of the chain.
         def _compile_with_unconfigured(**kwargs):
             calls["n"] += 1
             if calls["n"] == 2:
-                raise ValueError("TOKENFREE_API_KEY is required for the TokenFree provider.")
+                raise ValueError("AFRIKIA_API_KEY is required for the Afrikia provider.")
             return _FailGraph() if calls["n"] == 1 else _OkGraph()
 
         calls["n"] = 0
         g.get_compiled_graph = _compile_with_unconfigured
         res = g.run_agent(query="test", thread_id="chain-test-2")
-        assert res.get("_fresh_reply") == "réponse openrouter", res.get("_fresh_reply")
+        assert res.get("_fresh_reply") == "réponse qwen2.5-7b", res.get("_fresh_reply")
         assert calls["n"] == 3, calls
     finally:
         g.get_compiled_graph = real_compile
-        (config.LLM_PROVIDER, config.LLM_FALLBACK_PROVIDER, config.LLM_FALLBACK_PROVIDERS) = saved
+        (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL) = saved
 
 
-# --- i. TokenFree provider: dispatch + required key ---------------------------
-def test_tokenfree_provider():
+# --- i. Afrikia provider: default model + required key --------------------------
+def test_afrikia_provider():
     import app.models.llm as llmmod
 
-    assert llmmod.default_model_for("tokenfree") == config.TOKENFREE_MODEL
-
-    saved_key = getattr(config, "TOKENFREE_API_KEY", "")
+    saved = (config.AFRIKIA_API_KEY, config.AFRIKIA_MODEL, config.LLM_MODEL)
     try:
-        config.TOKENFREE_API_KEY = ""
+        config.LLM_MODEL = None
+        assert llmmod.get_default_model() == config.AFRIKIA_MODEL
+
+        config.AFRIKIA_API_KEY = None
         try:
-            with llmmod.use_provider("tokenfree"):
-                llmmod.get_llm()
-            raise AssertionError("expected ValueError without TOKENFREE_API_KEY")
+            llmmod.get_llm(model="test-afrikia-provider")
+            raise AssertionError("expected ValueError without AFRIKIA_API_KEY")
         except ValueError as e:
-            assert "TOKENFREE_API_KEY" in str(e)
+            assert "AFRIKIA_API_KEY" in str(e)
         # With a key, the client builds (no network at construction)
-        config.TOKENFREE_API_KEY = "tf-test-key"
-        with llmmod.use_provider("tokenfree"):
-            llm = llmmod.get_llm()
-        assert getattr(llm, "model_name", None) == config.TOKENFREE_MODEL or \
-            getattr(llm, "model", None) == config.TOKENFREE_MODEL
-        assert "tokenfree.com" in str(getattr(llm, "openai_api_base", "") or getattr(llm, "base_url", ""))
+        config.AFRIKIA_API_KEY = "af-test-key"
+        llm = llmmod.get_llm(model="test-afrikia-provider")
+        assert getattr(llm, "model_name", None) == "test-afrikia-provider" or \
+            getattr(llm, "model", None) == "test-afrikia-provider"
+        assert "afrikia.neobytech.net" in str(
+            getattr(llm, "openai_api_base", "") or getattr(llm, "base_url", ""))
+        # LLM_MODEL env override wins over AFRIKIA_MODEL
+        config.LLM_MODEL = "custom-override"
+        assert llmmod.get_default_model() == "custom-override"
     finally:
-        config.TOKENFREE_API_KEY = saved_key
+        (config.AFRIKIA_API_KEY, config.AFRIKIA_MODEL, config.LLM_MODEL) = saved
 
 
 # --- i. Junk-reply re-roll: one same-provider retry on guarded junk ------------

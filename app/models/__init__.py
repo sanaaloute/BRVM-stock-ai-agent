@@ -1,1 +1,1 @@
-"""LLM providers: Ollama, TokenFree, OpenRouter."""
+"""LLM provider: Afrikia (OpenAI-compatible)."""

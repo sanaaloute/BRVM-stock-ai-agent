@@ -29,6 +29,6 @@ SCRAPER_TOOLS = [
 ]
 
 
-def create_scraper_agent(model: str = "glm-5:cloud"):
+def create_scraper_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, SCRAPER_TOOLS)

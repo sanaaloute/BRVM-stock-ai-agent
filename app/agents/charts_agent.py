@@ -32,7 +32,7 @@ CHARTS_TOOLS = [
 ]
 
 
-MAX_CHART_CAPTION_CHARS = 50  # Telegram chart captions stay short; full text goes in follow-up messages
+MAX_CHART_CAPTION_CHARS = 50  # Chart captions stay short; full text goes in follow-up messages
 
 
 def _parse_chart_tool_content(content: Any) -> dict | None:
@@ -101,6 +101,6 @@ def _extract_chart_caption_from_messages(messages: list) -> str | None:
     return caption
 
 
-def create_charts_agent(model: str = "glm-5:cloud"):
+def create_charts_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, CHARTS_TOOLS)

@@ -1,4 +1,4 @@
-"""Configuration for scrapers and Telegram bot."""
+"""Configuration for scrapers, the chat API and the mobile backend."""
 
 import os
 
@@ -48,15 +48,13 @@ API_PORT = int(os.getenv("API_PORT", "8000").strip() or "8000")
 
 # Host interface the API port is published on (docker compose). Default localhost:
 
-# set API_BIND=0.0.0.0 only when the Meta WhatsApp webhook (or another external
+# set API_BIND=0.0.0.0 only when an external client must reach the API
 
-# client) must reach the API directly — and then API_SECRET_KEY is mandatory.
+# directly — and then API_SECRET_KEY is mandatory.
 
 API_BIND = os.getenv("API_BIND", "127.0.0.1").strip() or "127.0.0.1"
 
 
-
-BRVM_API_URL = os.getenv("BRVM_API_URL", f"http://localhost:{API_PORT}").rstrip("/")
 
 # Set BRVM_VERIFY_SSL=0 or false to skip SSL verification for brvm.org (e.g. certificate chain issues)
 
@@ -82,7 +80,7 @@ AGENT_QUEUE_TIMEOUT = float(os.getenv("AGENT_QUEUE_TIMEOUT", "60"))
 
 
 
-# Security: shared secret the bot sends as X-API-Key to call the Chat API.
+# Security: shared secret sent as X-API-Key to call the Chat API.
 
 # Empty = dev mode (no auth, warning logged). MUST be set in production.
 
@@ -104,7 +102,7 @@ DAILY_FREE_QUOTA = int(os.getenv("DAILY_FREE_QUOTA", "30"))
 
 # Comma-separated user ids exempt from the daily quota (owner/testers).
 
-# Accepts raw Telegram ids or channel keys like "wa:22507000000".
+# Accepts mobile user keys like "app:3" or numeric principal ids.
 
 QUOTA_EXEMPT_IDS = {s.strip() for s in os.getenv("QUOTA_EXEMPT_IDS", "").split(",") if s.strip()}
 
@@ -117,72 +115,6 @@ QUOTA_EXEMPT_IDS = {s.strip() for s in os.getenv("QUOTA_EXEMPT_IDS", "").split("
 # (format: postgresql://user:password@host:5432/dbname).
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-
-
-
-# WhatsApp Business Cloud API channel. All four required to enable; the webhook
-
-# (GET/POST /whatsapp/webhook) must be reachable over public HTTPS from Meta.
-
-WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip()
-
-WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
-
-WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
-
-# Meta App Secret (Meta app > Settings > Basic). Used to verify the
-
-# X-Hub-Signature-256 HMAC on inbound webhooks — without it anyone who finds the
-
-# webhook URL can inject messages as any phone number, so the channel stays
-
-# disabled until it is set.
-
-WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET", "").strip()
-
-WHATSAPP_ENABLED = bool(WHATSAPP_VERIFY_TOKEN and WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_APP_SECRET)
-
-
-
-# Dedup window for delivered WhatsApp message ids (Meta retries delivery until
-
-# acked, sometimes long after). Default 24h.
-
-WHATSAPP_DEDUP_TTL_SECONDS = float(os.getenv("WHATSAPP_DEDUP_TTL_SECONDS", "86400"))
-
-
-
-# WhatsApp via Evolution API channel (self-hosted gateway). All three required
-
-# to enable; the webhook (POST /whatsapp/evolution/webhook) must be reachable
-
-# over public HTTPS from the Evolution instance. EVOLUTION_API_KEY is also used
-
-# to authenticate inbound webhook calls (Evolution sends it as `apikey` header).
-
-EVOLUTION_URL = os.getenv("EVOLUTION_URL", "").strip().rstrip("/")
-
-EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "").strip()
-
-EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "").strip()
-
-EVOLUTION_ENABLED = bool(EVOLUTION_URL and EVOLUTION_API_KEY and EVOLUTION_INSTANCE)
-
-
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-
-
-
-# Optional: custom base URL for the Telegram Bot API, e.g. a Cloudflare Worker
-
-# reverse proxy (see cloudflare/telegram-api-proxy/) for hosts from which
-
-# api.telegram.org is unreachable. Empty = official https://api.telegram.org.
-
-# Used for both API calls and file downloads (voice notes).
-
-TELEGRAM_BASE_URL = os.getenv("TELEGRAM_BASE_URL", "").strip().rstrip("/")
 
 
 
@@ -208,42 +140,27 @@ else:
 
 
 
-# Local Ollama is the only LLM backend used by the app.
-LLM_PROVIDER = "ollama"
-LLM_FALLBACK_PROVIDERS = ""
-LLM_FALLBACK_PROVIDER = ""
-DEFAULT_OLLAMA_MODEL = "modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"
+# Afrikia (https://afrikia.neobytech.net/v1) is the only LLM provider used by
+# the app — OpenAI-compatible API, see client-guide.md.
+LLM_PROVIDER = "afrikia"
 
-# Optional: override model for the local provider.
+AFRIKIA_API_KEY = os.getenv("AFRIKIA_API_KEY", "").strip() or None
+AFRIKIA_BASE_URL = os.getenv("AFRIKIA_BASE_URL", "https://afrikia.neobytech.net/v1").strip().rstrip("/")
+AFRIKIA_MODEL = os.getenv("AFRIKIA_MODEL", "gpt-oss-20b").strip() or "gpt-oss-20b"
+
+# Fallback models tried in order (same provider, same key) when the primary
+# model's upstream is down.
+AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "nemotron-3-nano,qwen2.5-7b").strip()
+
+# Optional: override the model for every agent (wins over AFRIKIA_MODEL).
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip() or None
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0").strip() or "0.0")
 LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120").strip() or "120")
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1").strip() or "1")
 
-OLLAMA_CLOUD_HOST = "https://ollama.com"
+# Optional Ollama Cloud key — scraper web_fetch/web_search fallback ONLY
+# (app/utils/ollama_web.py, used when Tavily fails). The chat LLM never uses Ollama.
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip() or None
-OLLAMA_CLOUD = False
-OLLAMA_CLOUD_MODEL = os.getenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b").strip() or "gpt-oss:120b"
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip() or None
-
-# A legacy cloud endpoint means localhost in the local-only setup.
-if OLLAMA_BASE_URL and OLLAMA_BASE_URL.rstrip("/") == OLLAMA_CLOUD_HOST:
-    OLLAMA_BASE_URL = None
-
-OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "24h").strip() or "24h"
-OLLAMA_REASONING = ""
-
-
-
-# Voice notes: local faster-whisper transcription (primary; Google Speech fallback).
-
-# small int8 ~250MB download, ~1GB RAM peak, good French accuracy on CPU.
-
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small").strip() or "small"
-
-WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8").strip() or "int8"
-
 
 
 
@@ -273,26 +190,6 @@ MEMORY_MAX_MESSAGES = int(os.getenv("MEMORY_MAX_MESSAGES", "20").strip() or "20"
 
 
 
-# TokenFree (https://www.tokenfree.com) — OpenAI-compatible API.
-
-TOKENFREE_API_KEY = os.getenv("TOKENFREE_API_KEY", "").strip()
-
-TOKENFREE_MODEL = os.getenv("TOKENFREE_MODEL", "qwen-max").strip() or "qwen-max"
-
-TOKENFREE_BASE_URL = os.getenv("TOKENFREE_BASE_URL", "https://www.tokenfree.com/v1").strip().rstrip("/")
-
-
-
-# OpenRouter (https://openrouter.ai)
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip() or None
-
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "arcee-ai/trinity-large-preview:free").strip()
-
-OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "").strip() or None  # Optional: HTTP-Referer for rankings
-
-OPENROUTER_SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "").strip() or None  # Optional: X-OpenRouter-Title for rankings
-
 # Company details cache: entrypoint.sh re-runs scripts/run_company_details_fetch.py when
 
 # any file in $DATA_DIR/company_details/ is missing or older than this many days.
@@ -313,7 +210,7 @@ SCORING_FUNDAMENTAL_WEIGHT = float(os.getenv("SCORING_FUNDAMENTAL_WEIGHT", "0.4"
 
 
 
-# Telegram digest: scheduled buy/sell summary pushed to /digest subscribers.
+# Mobile digest: scheduled buy/sell summary pushed (FCM) to subscribers.
 
 # Daily edition on weekdays, weekly on Friday, at DIGEST_HOUR_GMT (post-close).
 

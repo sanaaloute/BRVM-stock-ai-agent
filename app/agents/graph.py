@@ -699,9 +699,9 @@ def run_agent(
         except Exception as upd_err:
             logger.warning("Could not persist clarification turn: %s", upd_err)
 
-    # At most 2 attempts per provider: one graph-level retry, only for
-    # transient LLM errors. If a fallback provider is configured and the
-    # primary's upstream is down (e.g. overloaded free tier), try once on it.
+    # At most 2 attempts per model: one graph-level retry, only for transient
+    # LLM errors. If fallback models are configured (AFRIKIA_FALLBACK_MODELS)
+    # and the primary's upstream is down, try once on each fallback model.
     def _invoke_with_retries(g, attempts: int) -> dict:
         for attempt in range(attempts):
             try:
@@ -753,38 +753,30 @@ def run_agent(
     except Exception as primary_err:
         if not _is_retryable_llm_error(primary_err):
             raise
-        from app.models.llm import default_model_for, use_provider
-
-        # Ordered fallback chain (LLM_FALLBACK_PROVIDERS, e.g. "tokenfree,openrouter");
-        # the legacy single LLM_FALLBACK_PROVIDER is merged in if present.
-        chain_raw = getattr(config, "LLM_FALLBACK_PROVIDERS", "") or ""
-        chain = [p.strip().lower() for p in chain_raw.split(",") if p.strip()]
-        legacy = (getattr(config, "LLM_FALLBACK_PROVIDER", "") or "").strip().lower()
-        if legacy and legacy not in chain:
-            chain.append(legacy)
-        primary = (config.LLM_PROVIDER or "").strip().lower()
+        # Fallback model chain (AFRIKIA_FALLBACK_MODELS, e.g.
+        # "nemotron-3-nano,qwen2.5-7b"): same provider, same key — only the
+        # model changes when the primary's upstream is down.
+        chain_raw = getattr(config, "AFRIKIA_FALLBACK_MODELS", "") or ""
+        chain = [m.strip() for m in chain_raw.split(",") if m.strip()]
         last_err: Exception = primary_err
-        for fb in chain:
-            if not fb or fb == primary:
+        for fb_model in chain:
+            if not fb_model or fb_model == model:
                 continue
             try:
                 logger.warning(
-                    "LLM provider unavailable (%s); trying fallback provider %s.",
-                    last_err, fb,
+                    "LLM model %s unavailable (%s); trying fallback model %s.",
+                    model, last_err, fb_model,
                 )
-                with use_provider(fb):
-                    fb_graph = get_compiled_graph(
-                        model=default_model_for(fb), checkpointer=checkpointer
-                    )
-                    return _invoke_with_retries(fb_graph, 1)
+                fb_graph = get_compiled_graph(model=fb_model, checkpointer=checkpointer)
+                return _invoke_with_retries(fb_graph, 1)
             except Exception as fb_err:
                 last_err = fb_err
                 if isinstance(fb_err, ValueError):
                     # Fallback not configured (e.g. missing API key) — skip it
                     # rather than blocking the rest of the chain.
-                    logger.warning("Fallback provider %s skipped: %s", fb, fb_err)
+                    logger.warning("Fallback model %s skipped: %s", fb_model, fb_err)
                     continue
                 if not _is_retryable_llm_error(fb_err):
                     raise
-                logger.warning("Fallback provider %s also failed: %s", fb, fb_err)
+                logger.warning("Fallback model %s also failed: %s", fb_model, fb_err)
         raise last_err

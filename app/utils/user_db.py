@@ -988,7 +988,7 @@ def digest_unsubscribe(telegram_id: int) -> dict[str, Any]:
 
 
 def digest_subscribers(frequency: str | None = None) -> list[int]:
-    """Telegram ids with an enabled subscription, optionally filtered by frequency."""
+    """Principal ids with an enabled subscription, optionally filtered by frequency."""
     _ensure_ready()
     stmt = select(models.DigestSubscription.telegram_id).where(
         models.DigestSubscription.enabled == 1

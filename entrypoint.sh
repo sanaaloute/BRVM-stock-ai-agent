@@ -35,7 +35,7 @@ fi
 
   if [ "$stale" = "1" ]; then
     echo "[entrypoint] SGI data missing or older than ${DAYS}d - fetching (best effort, background)..."
-    # flock: api + bot share the data volume and may boot together on first deploy.
+    # flock: api containers can overlap during a recreate and share the data volume.
     if command -v flock >/dev/null 2>&1; then
       flock "$DATA_DIR/.sgi.lock" python -m scripts.run_sgi_fetch \
         || echo "[entrypoint] WARNING: SGI fetch failed (non-fatal); SGI answers may be limited."

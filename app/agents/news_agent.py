@@ -39,6 +39,6 @@ def get_news_agent_system() -> str:
 **Rule:** Call tools first. Use get_company_info for names. List: date, title, link. Empty → say "No news found". No tool names in reply."""
 
 
-def create_news_agent(model: str = "glm-5:cloud"):
+def create_news_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, NEWS_TOOLS)

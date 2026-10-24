@@ -1,26 +1,36 @@
-# `docker compose up -d` starts the full stack: PostgreSQL + Chat API + Telegram bot
-# + Evolution API (self-hosted WhatsApp gateway). The LLM uses the host's local
-# Ollama installation; no Ollama container is included.
-# (+ SGI broker data auto-bootstrapped into the shared volume by the image
-# entrypoint — no manual `python -m scripts.run_sgi_fetch` step; refreshed when older than
-# 7 days, tunable via SGI_REFRESH_DAYS).
-#
-# Data lives in PostgreSQL (user data + chat checkpoints) when DATABASE_URL is set
-# (default here). To run on local SQLite instead, remove DATABASE_URL from both
-# services; the bot_data volume then holds the .db files.
+# 
+name: kora
+
 services:
+  cloudflared:
+    image: cloudflare/cloudflared:2025.8.1
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    profiles:
+      - tunnel
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: brvm
-      # No fallback default on purpose: compose fails fast with a clear message
-      # when POSTGRES_PASSWORD is unset, instead of deploying a known password.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
       POSTGRES_DB: brvm
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Creates the extra `evolution` database on FIRST init of the volume only.
-      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/00-init-db.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U brvm -d brvm"]
       interval: 5s
@@ -28,7 +38,7 @@ services:
       retries: 10
     restart: unless-stopped
     # Cap the json-file log driver (uncapped it grows unbounded on an always-on
-    # host). Same block on every service below.
+    # host). Same block on the api service below.
     logging:
       driver: json-file
       options:
@@ -42,28 +52,13 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
-      # Inside the compose network the bot reaches Evolution by service name.
-      - EVOLUTION_URL=http://evolution:8080
-      # In-container port stays 8000; API_PORT in .env only changes the
-      # published host port below.
       - API_PORT=8000
-      # Inside the container the API must listen on all interfaces so the bot
-      # service and the published port can reach it. Host-side exposure is
-      # limited by the ports mapping below (default 127.0.0.1).
       - API_BIND=0.0.0.0
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
-      # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
-      # must match the market. Override TZ in .env.
+      - AFRIKIA_API_KEY=${AFRIKIA_API_KEY:?Set AFRIKIA_API_KEY in .env (see .env.example)}
+      - AFRIKIA_BASE_URL=${AFRIKIA_BASE_URL:-https://afrikia.neobytech.net/v1}
+      - AFRIKIA_MODEL=${AFRIKIA_MODEL:-gpt-oss-20b}
       - TZ=${TZ:-Africa/Abidjan}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
-      # Localhost-only by default: the API can run unauthenticated in dev mode.
-      # Set API_BIND=0.0.0.0 in .env ONLY when the Meta WhatsApp webhook needs
-      # public ingress — the Evolution gateway and the Telegram bot don't (they
-      # use the compose network / outbound polling).
       - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
       - bot_data:/app/app/data
@@ -76,89 +71,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      evolution:
-        condition: service_started
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  bot:
-    build: .
-    image: realtimestock-bot:latest
-    env_file: .env
-    environment:
-      - BRVM_API_URL=http://api:8000
-      - DATABASE_URL=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/brvm
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-modelscope.cn/Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M}
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
-      # BRVM trades on GMT (Africa/Abidjan): date cutoffs and cache staleness
-      # must match the market. Override TZ in .env.
-      - TZ=${TZ:-Africa/Abidjan}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - bot_data:/app/app/data
-    depends_on:
-      api:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-
-  # Evolution API: self-hosted WhatsApp gateway (Baileys). Pair a WhatsApp
-  # number via QR code, then point its webhook at the api service:
-  #   http://api:8000/whatsapp/evolution/webhook  (event MESSAGES_UPSERT, base64 on)
-  # AUTHENTICATION_API_KEY is YOUR chosen secret — set EVOLUTION_API_KEY in .env.
-  evolution:
-    # Official image (namespace moved from atendai/ to evoapicloud/ in v2.3.0).
-    # PINNED to v2.3.7 on purpose: v2.4.0 (and the moving `homolog` tag) has a
-    # confirmed upstream bug where POST /instance/create always fails with a
-    # `Setting_instanceId_fkey` FK violation on fresh installs (instanceName is
-    # stripped by a sanitization guard before instance.create — see
-    # evolution-foundation/evolution-api#2631, fix PR #2608 unmerged). v2.4.0
-    # also introduced mandatory license activation (free, one-time, via the
-    # manager UI); v2.3.7 needs no activation. Revisit `homolog` once #2631 is
-    # fixed upstream — note it then requires the license step documented in
-    # .env.example (EVOLUTION_OPERATOR_EMAIL).
-    image: evoapicloud/evolution-api:v2.3.7
-    environment:
-      - SERVER_PORT=8080
-      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-change-me}
-      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
-      - DATABASE_ENABLED=true
-      - DATABASE_PROVIDER=postgresql
-      - DATABASE_CONNECTION_URI=postgresql://brvm:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@db:5432/evolution
-      - DATABASE_CONNECTION_CLIENT_NAME=evolution
-      - DATABASE_SAVE_DATA_INSTANCE=true
-      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
-      - DATABASE_SAVE_DATA_CONTACTS=false
-      - DATABASE_SAVE_DATA_CHATS=false
-      - CACHE_REDIS_ENABLED=false
-      - CACHE_LOCAL_ENABLED=true
-      - LOG_LEVEL=ERROR,WARN,INFO
-      - DEL_INSTANCE=false
-      # Optional (only relevant on v2.4.0+ images): headless license
-      # auto-activation after a first manual registration. Empty = skipped.
-      - EVOLUTION_OPERATOR_EMAIL=${EVOLUTION_OPERATOR_EMAIL:-}
-    # Bound to localhost only: the bot reaches Evolution over the compose network
-    # (http://evolution:8080), and admin access (QR pairing, webhook setup) goes
-    # through an SSH tunnel — never expose this port in the EC2 security group.
-    ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - evolution_data:/evolution/instances
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
@@ -168,4 +80,3 @@ services:
 volumes:
   bot_data:
   postgres_data:
-  evolution_data:

@@ -3,14 +3,12 @@
 #
 # Creates ./backups/YYYYMMDD-HHMMSS/ containing:
 #   postgres.sql          pg_dump of the brvm database
-#   evolution.sql         pg_dump of the evolution database (skipped if missing)
 #   bot_data.tar.gz       archive of the bot_data named volume
-#   evolution_data.tar.gz archive of the evolution_data named volume
 # then deletes backup directories older than 14 days.
 #
-# Override the destination root with BACKUP_DIR. Schedule via cron — see
-# README.md, "Production hardening". The compose stack must be up (pg_dump goes
-# through `docker compose exec db`). Compatible with macOS bash 3.2.
+# Override the destination root with BACKUP_DIR. Schedule via cron. The compose
+# stack must be up (pg_dump goes through `docker compose exec db`). Compatible
+# with macOS bash 3.2.
 set -euo pipefail
 
 # cron on macOS has a minimal PATH; make sure the docker CLI is reachable.
@@ -46,13 +44,6 @@ PROJECT_NAME="$(printf '%s' "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | tr -c
 echo "[backup] dumping Postgres database 'brvm'..."
 docker compose exec -T db pg_dump -U brvm -d brvm > "$DEST/postgres.sql"
 
-# The evolution database only exists on installs that use the WhatsApp gateway;
-# tolerate it missing.
-if ! docker compose exec -T db pg_dump -U brvm -d evolution > "$DEST/evolution.sql"; then
-  rm -f "$DEST/evolution.sql"
-  echo "[backup] NOTE: database 'evolution' could not be dumped (does not exist?) — skipped."
-fi
-
 # --- Named volumes ----------------------------------------------------------
 # Echoes the real volume name ("<project>_<key>"), or nothing if not found.
 resolve_volume() {
@@ -80,7 +71,6 @@ backup_volume() {
 }
 
 backup_volume bot_data bot_data.tar.gz
-backup_volume evolution_data evolution_data.tar.gz
 
 # --- Retention --------------------------------------------------------------
 echo "[backup] pruning backups older than 14 days..."

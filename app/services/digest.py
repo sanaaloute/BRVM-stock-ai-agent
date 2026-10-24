@@ -1,11 +1,11 @@
 """Scheduled BRVM market digest ("résumé du marché") pushed to subscribers.
 
-Pure composition logic: no Telegram imports, no network access of its own.
-The scheduled job (run_telegram_bot.py / app/main.py) calls run_digest(),
-which scores the market once via the deterministic engine, persists the
-snapshot rows (day-over-day signal changes), then composes one French text
-per subscriber. Everything is total: scoring/persistence failures yield an
-empty list, per-subscriber failures are logged and skipped — never an
+Pure composition logic: no channel imports, no network access of its own.
+The scheduled job (app/services/scheduler.py, started from the API lifespan)
+calls run_digest(), which scores the market once via the deterministic engine,
+persists the snapshot rows (day-over-day signal changes), then composes one
+French text per subscriber. Everything is total: scoring/persistence failures
+yield an empty list, per-subscriber failures are logged and skipped — never an
 exception.
 """
 from __future__ import annotations

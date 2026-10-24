@@ -19,7 +19,7 @@ from sqlalchemy import delete, select
 import config
 from app.agents import run_agent
 from app.agents.graph import CHAT_MEMORY_DB
-from app.bot.redact import redact_for_telegram
+from app.utils.redact import redact_for_chat
 from app.db import engine as db_engine
 from app.db import migrate as db_migrate
 from app.db import models as db_models
@@ -173,7 +173,7 @@ def _user_friendly_error(exc: Exception) -> str:
     if "recursion" in err_str:
         return "La question est trop complexe. Essayez une question plus simple."
     if "404" in err_str:
-        return "Modèle introuvable. Téléchargez-le d'abord : ollama pull <model>"
+        return "Modèle IA introuvable. Vérifiez AFRIKIA_MODEL dans la configuration."
     if "503" in err_str:
         return "Le service IA est occupé ou charge encore le modèle. Attendez quelques secondes et réessayez."
     if "ssl" in err_str or "eof" in err_str or "connect" in err_str:
@@ -186,10 +186,12 @@ def _user_friendly_error(exc: Exception) -> str:
 class ChatRequest(BaseModel):
     query: str
     thread_id: str = "default"
+    # Legacy field name: carries the caller's principal id (mobile app users
+    # included — mobile.py stuffs the app principal id here). Agent tools
+    # (portfolio etc.) key on it; the DB columns are named telegram_id.
     telegram_user_id: int | None = None
-    # Channel-agnostic identity (e.g. "wa:22507000000"). When set, it is the
-    # key used for rate limiting and the daily quota. Telegram callers keep
-    # sending telegram_user_id (their key stays the raw id for back-compat).
+    # Channel-agnostic identity key (e.g. "app:3"). When set, it is the key
+    # used for rate limiting and the daily quota.
     user_id: str | None = None
 
 
@@ -370,7 +372,7 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
 
         clarification = result.get("clarification")
         if clarification:
-            reply = redact_for_telegram(clarification)
+            reply = redact_for_chat(clarification)
             if _needs_footer(result, clarification=True):
                 reply += SOURCE_FOOTER
             return ChatResponse(reply=reply, clarification=True)
@@ -382,7 +384,7 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
             # stale previous-turn answer (or raw ToolMessage JSON) as the reply.
             logger.warning("No fresh reply produced for thread %s", req.thread_id)
             return ChatError(error="Une erreur s'est produite. Veuillez réessayer.")
-        reply = redact_for_telegram(raw_reply)
+        reply = redact_for_chat(raw_reply)
         if _needs_footer(result, clarification=False):
             reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
 
@@ -430,7 +432,7 @@ async def chat(req: ChatRequest) -> ChatResponse | ChatError:
 
 @router.post("/clear-memory", dependencies=[Depends(verify_api_key)])
 def clear_memory(req: ClearMemoryRequest) -> dict:
-    """Clear conversation checkpoint for the given thread_id. Bot can call this for /clearmemory."""
+    """Clear conversation checkpoint for the given thread_id."""
     try:
         # Works on both backends (SqliteSaver / PostgresSaver share this API).
         _get_checkpointer().delete_thread(req.thread_id)
@@ -466,6 +468,14 @@ async def _lifespan(app: FastAPI):
     from app.services.market_data import scheduled_refresh_loop
 
     tasks.append(asyncio.create_task(scheduled_refresh_loop()))
+    # Digest, price-target alerts and daily timeseries refresh (FCM push only;
+    # the Telegram bot that used to host these jobs is gone).
+    from app.services import scheduler
+
+    tasks.append(asyncio.create_task(scheduler.target_alerts_loop()))
+    if config.DIGEST_ENABLED:
+        tasks.append(asyncio.create_task(scheduler.digest_loop()))
+    tasks.append(asyncio.create_task(scheduler.timeseries_loop()))
     yield
     for task in tasks:
         task.cancel()
@@ -477,16 +487,6 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="BRVM Chat API", version="1.0", lifespan=_lifespan)
 app.include_router(router)
-
-# WhatsApp Business Cloud API webhook (no-op unless WHATSAPP_* env vars are set).
-from app.api.whatsapp import router as whatsapp_router  # noqa: E402
-
-app.include_router(whatsapp_router)
-
-# WhatsApp via Evolution API webhook (no-op unless EVOLUTION_* env vars are set).
-from app.channels.whatsapp import router as whatsapp_evolution_router  # noqa: E402
-
-app.include_router(whatsapp_evolution_router)
 
 # Mobile app (Flutter) API: JWT auth + market/portfolio/chat endpoints.
 from app.api.mobile_auth import router as mobile_auth_router  # noqa: E402

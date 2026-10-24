@@ -298,6 +298,6 @@ def extract_transactions(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     except Exception as exc:
         raise DocumentError(
             "extraction_failed",
-            "Le service local d'extraction est temporairement indisponible. Réessayez.",
+            "Le service d'extraction est temporairement indisponible. Réessayez.",
         ) from exc
     return validate_transactions(getattr(response, "content", response))

@@ -41,6 +41,6 @@ ANALYTICS_TOOLS = [
 ]
 
 
-def create_analytics_agent(model: str = "glm-5:cloud"):
+def create_analytics_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, ANALYTICS_TOOLS)

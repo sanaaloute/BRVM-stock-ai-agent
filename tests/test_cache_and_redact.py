@@ -20,7 +20,7 @@ def _load(name: str, rel: str):
 
 
 cache_mod = _load("cache_mod", "app/utils/cache.py")
-redact_mod = _load("redact_mod", "app/bot/redact.py")
+redact_mod = _load("redact_mod", "app/utils/redact.py")
 
 
 # ---------------- MarketDataCache ----------------
@@ -59,9 +59,9 @@ def test_cache_corrupt_disk_file_ignored():
         assert c.get("k") is None
 
 
-# ---------------- redact_for_telegram ----------------
+# ---------------- redact_for_chat ----------------
 def test_redact_strips_markdown():
-    out = redact_mod.redact_for_telegram("## Price\n**NTLC** is at *53 000* F CFA (`last close`)")
+    out = redact_mod.redact_for_chat("## Price\n**NTLC** is at *53 000* F CFA (`last close`)")
     assert "##" not in out and "**" not in out and "`" not in out
     assert "NTLC" in out
     assert "last close" in out
@@ -74,7 +74,7 @@ def test_redact_removes_internal_lines():
         "I used the plot_company_chart tool to make it.\n"
         "Price went up 2%."
     )
-    out = redact_mod.redact_for_telegram(raw)
+    out = redact_mod.redact_for_chat(raw)
     assert "/tmp/" not in out
     assert "plot_company_chart" not in out
     assert "Price went up 2%." in out
@@ -82,19 +82,19 @@ def test_redact_removes_internal_lines():
 
 def test_redact_table_to_lines():
     raw = "| Symbol | Price |\n| --- | --- |\n| NTLC | 53 000 |\n| SLBC | 35 540 |"
-    out = redact_mod.redact_for_telegram(raw)
+    out = redact_mod.redact_for_chat(raw)
     assert "|" not in out
     assert "NTLC · 53 000" in out
     assert "SLBC · 35 540" in out
 
 
 def test_redact_empty():
-    assert redact_mod.redact_for_telegram("") == "No answer."
-    assert redact_mod.redact_for_telegram("   ") == "No answer."
+    assert redact_mod.redact_for_chat("") == "No answer."
+    assert redact_mod.redact_for_chat("   ") == "No answer."
 
 
 def test_redact_keeps_content():
-    out = redact_mod.redact_for_telegram("NTLC: 53 000 F CFA (+1,2%)")
+    out = redact_mod.redact_for_chat("NTLC: 53 000 F CFA (+1,2%)")
     assert out == "NTLC: 53 000 F CFA (+1,2%)"
 
 

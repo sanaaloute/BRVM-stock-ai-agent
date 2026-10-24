@@ -44,5 +44,5 @@ COMPANY_DETAILS_TOOLS = [
 
 
 def create_company_details_agent(model: str | None = None):
-    llm = get_llm(model=model or "glm-5:cloud")
+    llm = get_llm(model=model)
     return create_react_agent(llm, COMPANY_DETAILS_TOOLS)

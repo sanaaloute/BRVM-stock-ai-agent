@@ -1,7 +1,6 @@
 """Mobile app REST API (Flutter). Everything here requires a JWT bearer token
-issued by /mobile/v1/auth — the mobile client never uses the bot's shared
-API_SECRET_KEY. User data is keyed by the app user's principal id, which is
-shared with the Telegram identity when the accounts are linked.
+issued by /mobile/v1/auth — the mobile client never uses the shared
+API_SECRET_KEY. User data is keyed by the app user's principal id.
 """
 from __future__ import annotations
 

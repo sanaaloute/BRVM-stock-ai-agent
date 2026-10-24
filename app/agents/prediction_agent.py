@@ -51,6 +51,6 @@ def get_prediction_agent_system() -> str:
     return PREDICTION_AGENT_SYSTEM_TEMPLATE.format(time_line=get_time_prefix())
 
 
-def create_prediction_agent(model: str = "glm-5:cloud"):
+def create_prediction_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, PREDICTION_TOOLS)

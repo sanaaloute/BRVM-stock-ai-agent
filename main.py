@@ -1,4 +1,4 @@
-"""Single entry point: runs API + Telegram bot. Usage: python main.py"""
+"""Single entry point: runs the BRVM Chat API. Usage: python main.py"""
 import sys
 import uvicorn
 

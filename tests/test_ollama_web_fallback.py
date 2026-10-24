@@ -1,8 +1,10 @@
-"""Tests for Ollama thinking mode (provider_ollama reasoning kwarg) and the
-Ollama Cloud web_search/web_fetch fallback channel (app/utils/ollama_web.py,
-BaseScraper.extract_content fallback).
+"""Tests for the Ollama Cloud web_search/web_fetch scraper fallback channel
+(app/utils/ollama_web.py, BaseScraper.extract_content fallback).
 
-Run: .venv/bin/python tests/test_ollama_features.py
+This is the only remaining Ollama usage in the app: a scraper fallback when
+Tavily fails. The chat LLM goes through the Afrikia provider.
+
+Run: .venv/bin/python tests/test_ollama_web_fallback.py
 """
 import sys
 from pathlib import Path
@@ -25,40 +27,6 @@ def check(name: str, cond: bool) -> None:
 
 
 def main() -> int:
-    from app.models.provider_ollama import _parse_reasoning
-
-    check("reasoning empty -> None", _parse_reasoning("") is None and _parse_reasoning("off") is None)
-    check("reasoning levels", all(_parse_reasoning(v) == v for v in ("low", "medium", "high")))
-    check("reasoning bools", _parse_reasoning("true") is True and _parse_reasoning("false") is False)
-    check("reasoning bogus -> None", _parse_reasoning("ultra") is None)
-
-    # Provider wires reasoning into ChatOllama kwargs only when configured.
-    import langchain_ollama
-    from app.models import provider_ollama
-
-    class _Recorder:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    real_cls = langchain_ollama.ChatOllama
-    langchain_ollama.ChatOllama = _Recorder
-    saved_reasoning = getattr(config, "OLLAMA_REASONING", "")
-    saved_cloud, saved_key = config.OLLAMA_CLOUD, config.OLLAMA_API_KEY
-    try:
-        config.OLLAMA_CLOUD = True
-        config.OLLAMA_API_KEY = "k"
-        config.OLLAMA_REASONING = "high"
-        llm = provider_ollama.create_ollama_llm()
-        check("reasoning=high wired", llm.kwargs.get("reasoning") == "high")
-        check("headers in client_kwargs", llm.kwargs["client_kwargs"]["headers"]["Authorization"] == "Bearer k")
-        config.OLLAMA_REASONING = ""
-        llm2 = provider_ollama.create_ollama_llm()
-        check("reasoning omitted when unset", "reasoning" not in llm2.kwargs)
-    finally:
-        langchain_ollama.ChatOllama = real_cls
-        config.OLLAMA_REASONING = saved_reasoning
-        config.OLLAMA_CLOUD, config.OLLAMA_API_KEY = saved_cloud, saved_key
-
     # ollama_web helpers
     import app.utils.ollama_web as ow
 

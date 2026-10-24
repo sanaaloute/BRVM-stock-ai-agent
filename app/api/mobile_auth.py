@@ -1,7 +1,7 @@
 """Mobile app auth endpoints: OTP request/verify, token refresh, logout.
 
 Mounted under /mobile/v1. The Flutter app authenticates with JWT bearer
-tokens; it never sees the bot's shared API_SECRET_KEY.
+tokens; it never sees the shared API_SECRET_KEY used by trusted API clients.
 """
 from __future__ import annotations
 

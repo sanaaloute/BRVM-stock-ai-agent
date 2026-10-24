@@ -38,6 +38,6 @@ ADVISOR_TOOLS = [
 ]
 
 
-def create_advisor_agent(model: str = "glm-5:cloud"):
+def create_advisor_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, ADVISOR_TOOLS)

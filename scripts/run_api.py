@@ -1,4 +1,4 @@
-"""Run BRVM Chat API only (no Telegram bot). For API + bot together, use: python main.py"""
+"""Run the BRVM Chat API. Alternative entry point: python main.py"""
 
 import sys
 from pathlib import Path
@@ -12,14 +12,12 @@ import sys
 import uvicorn
 
 from config import API_BIND, API_PORT
-from app.utils.log_redact import install_log_redaction
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-install_log_redaction()  # keep the bot token out of httpx request logs
 
 if __name__ == "__main__":
     # host: API_BIND (default 127.0.0.1 = local only). docker compose overrides

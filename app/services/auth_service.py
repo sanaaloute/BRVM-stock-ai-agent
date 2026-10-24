@@ -3,9 +3,8 @@ app-user identity. The mobile API (app.api.mobile*) builds on this module.
 
 Identity model: an AppUser owns a ``principal_id`` integer that doubles as the
 ``telegram_id`` key across the legacy user tables (see app.db.models.AppUser).
-App-only users get a synthetic negative principal id; linked users share their
-real Telegram id, so portfolio/watchlist/alerts are shared between the bot and
-the app for the same person.
+App-only users get a synthetic negative principal id (the column name predates
+the mobile app; kept for back-compat with existing databases).
 """
 from __future__ import annotations
 

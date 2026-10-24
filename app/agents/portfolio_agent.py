@@ -22,6 +22,6 @@ You are managing the account of the verified chat user (id {telegram_id}). The u
 **Rule:** Remove from portfolio+tracking+targets when asked. No tool names in reply."""
 
 
-def create_portfolio_agent(model: str = "glm-5:cloud"):
+def create_portfolio_agent(model: str | None = None):
     llm = get_llm(model=model)
     return create_react_agent(llm, PORTFOLIO_TOOLS)

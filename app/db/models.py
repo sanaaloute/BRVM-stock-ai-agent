@@ -1,14 +1,13 @@
-"""Declarative models for the user database (BRVM bot).
+"""Declarative models for the user database.
 
 Schema matches the legacy hand-rolled DDL exactly (table/column names, uniques,
 FKs, partial index) so existing SQLite/PostgreSQL databases are adopted as-is
 by migration 0001. String columns are Text (legacy PostgreSQL used TEXT).
 
 Mobile app identity: every app user (see AppUser) owns a *principal id* — an
-integer used as the ``telegram_id`` key across the legacy tables. When the
-account is linked to a real Telegram account the principal id IS the Telegram
-id; app-only users get a synthetic negative id (real Telegram ids are always
-positive, so the namespaces never collide). Legacy helpers in
+integer used as the ``telegram_id`` key across the legacy tables (the column
+names predate the mobile app; kept for back-compat with existing databases).
+App-only users get a synthetic negative id. Legacy helpers in
 app.utils.user_db therefore work unchanged for mobile users.
 """
 from __future__ import annotations

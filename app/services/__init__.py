@@ -1,1 +1,1 @@
-"""Channel-agnostic services shared by messaging channels (Telegram, WhatsApp)."""
+"""Channel-agnostic backend services (market data, digest, push, auth)."""
