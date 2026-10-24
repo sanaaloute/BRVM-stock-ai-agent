@@ -14,6 +14,9 @@ venv/
 # Environment variables
 .env
 
+# Provider setup guide (operator-local, not committed)
+client-guide.md
+
 # Private keys / certificates (never commit)
 *.pem
 
@@ -23,11 +26,15 @@ venv/
 # OS
 .DS_Store
 
-# Bot user data (portfolio, tracking, targets, chat memory) and market cache
-app/data/brvm_bot.db
-app/data/chat_memory.db
+# Bot user data (portfolio, tracking, targets, chat memory) and market cache.
+# Runtime/generated content — regenerated locally; only BRVM_Companies.xlsx
+# (the symbol validation source) stays tracked.
+app/data/*.db
+app/data/*.db-wal
+app/data/*.db-shm
 app/data/palmares_cache.json
 app/data/sgi_brvm.json
+app/data/company_details/
 debug-ce8ad8.log
 app/data/series/*.csv
 

@@ -31,7 +31,7 @@ def main() -> int:
     if not text:
         return 1
     if not config.AFRIKIA_API_KEY:
-        print("Error: AFRIKIA_API_KEY is required. Set it in .env (see client-guide.md)", file=sys.stderr)
+        print("Error: AFRIKIA_API_KEY is required. Set it in .env", file=sys.stderr)
         return 1
 
     model = args.model or get_default_model()

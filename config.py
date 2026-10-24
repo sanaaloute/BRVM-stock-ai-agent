@@ -141,7 +141,7 @@ else:
 
 
 # Afrikia (https://afrikia.neobytech.net/v1) is the only LLM provider used by
-# the app — OpenAI-compatible API, see client-guide.md.
+# the app — OpenAI-compatible API.
 LLM_PROVIDER = "afrikia"
 
 AFRIKIA_API_KEY = os.getenv("AFRIKIA_API_KEY", "").strip() or None

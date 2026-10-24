@@ -1,8 +1,7 @@
 """Afrikia LLM provider — OpenAI-compatible API (https://afrikia.neobytech.net/v1).
 
-See client-guide.md for the available models. gpt-oss-20b and nemotron-3-nano
-are reasoning models: the chain-of-thought comes back as reasoning_content and
-never leaks into the user-facing content."""
+gpt-oss-20b and nemotron-3-nano are reasoning models: the chain-of-thought
+comes back as reasoning_content and never leaks into the user-facing content."""
 from __future__ import annotations
 
 from typing import Any
@@ -18,7 +17,7 @@ def create_afrikia_llm(model: str | None = None, temperature: float = 0, **kwarg
     if not api_key:
         raise ValueError(
             "AFRIKIA_API_KEY is required for the Afrikia provider. "
-            "Set it in .env (see client-guide.md)."
+            "Set it in .env."
         )
 
     return ChatOpenAI(
