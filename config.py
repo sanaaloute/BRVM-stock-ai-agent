@@ -146,11 +146,11 @@ LLM_PROVIDER = "afrikia"
 
 AFRIKIA_API_KEY = os.getenv("AFRIKIA_API_KEY", "").strip() or None
 AFRIKIA_BASE_URL = os.getenv("AFRIKIA_BASE_URL", "https://afrikia.neobytech.net/v1").strip().rstrip("/")
-AFRIKIA_MODEL = os.getenv("AFRIKIA_MODEL", "gpt-oss-20b").strip() or "gpt-oss-20b"
+AFRIKIA_MODEL = os.getenv("AFRIKIA_MODEL", "nemotron-3-nano").strip() or "nemotron-3-nano"
 
 # Fallback models tried in order (same provider, same key) when the primary
 # model's upstream is down.
-AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "nemotron-3-nano,qwen2.5-7b").strip()
+AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "qwen2.5-7b").strip()
 
 # Optional: override the model for every agent (wins over AFRIKIA_MODEL).
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip() or None

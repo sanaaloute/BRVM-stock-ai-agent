@@ -51,7 +51,7 @@ After pulling code changes or editing `.env`:
 The API uses the hosted Afrikia LLM provider
 (`https://afrikia.neobytech.net/v1`, OpenAI-compatible); no local LLM
 installation is needed. Set `AFRIKIA_API_KEY` in `.env` (required — compose
-fails fast without it). The model defaults to `gpt-oss-20b`; override it with
+fails fast without it). The model defaults to `nemotron-3-nano`; override it with
 `AFRIKIA_MODEL` in `.env`, and list backups tried when the primary model is
 unavailable in `AFRIKIA_FALLBACK_MODELS` (comma-separated). Check connectivity
 from the API container with:

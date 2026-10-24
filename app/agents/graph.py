@@ -77,11 +77,12 @@ unavailable (and which data) — then stop. Do NOT guess, approximate, or fill
 from memory. This applies to company names too: use the company_name from the
 tool output, or just the symbol — never invent a name."""
 
-# Trailing user-role nudge appended to every worker input: gpt-oss (harmony
-# format) tends to skip tool calls and freestyle from memory when the
-# conversation ends with an assistant message (the [NLU] routing note). Ending
-# the input with a HumanMessage restores tool calling. It is stripped from the
-# worker's output, so it never reaches state or memory.
+# Trailing user-role nudge appended to every worker input: some models
+# (especially reasoning/harmony-format ones) tend to skip tool calls and
+# freestyle from memory when the conversation ends with an assistant message
+# (the [NLU] routing note). Ending the input with a HumanMessage restores tool
+# calling. It is stripped from the worker's output, so it never reaches state or
+# memory.
 _WORKER_NUDGE = (
     "Réponds à la dernière question de l'utilisateur en appelant les outils "
     "à ta disposition, puis synthétise le résultat."
@@ -323,7 +324,7 @@ def _build_worker_node(
                 prefix = prefix.rstrip() + entities_hint
             messages = [SystemMessage(content=prefix)] + list(messages)
         # End the input with a user-role nudge: with the NLU note (assistant
-        # role) last, gpt-oss tends to skip tool calls and answer from memory.
+        # role) last, some models tend to skip tool calls and answer from memory.
         messages = messages + [HumanMessage(content=_WORKER_NUDGE)]
         # Forward the run config so tool-level injections (RunnableConfig, e.g.
         # the verified user id for portfolio tools) reach nested agents — also
@@ -602,7 +603,7 @@ def _is_retryable_llm_error(exc: BaseException) -> bool:
 
 def _is_usable_reply(content: str) -> bool:
     """False for model-output junk that must never reach the user:
-    raw JSON blobs and harmony/tool-call fragments (e.g. gpt-oss emitting
+    raw JSON blobs and harmony/tool-call fragments (e.g. some models emit
     ', tools=functions.get_stock_metrics' or '{"top_n": 1}' as content when a
     provider fails to parse tool calls). A legit reply is French prose."""
     text = (content or "").strip()
@@ -718,8 +719,8 @@ def run_agent(
                     and attempt < attempts - 1
                 ):
                     # The model produced only guarded junk (harmony fragments /
-                    # JSON blobs — intermittent with gpt-oss). Re-roll once on
-                    # the same provider before giving up.
+                    # JSON blobs — intermittent with some models). Re-roll once
+                    # on the same provider before giving up.
                     logger.warning("Run produced no usable reply (model junk); re-rolling once.")
                     time.sleep(1.0)
                     continue
@@ -754,8 +755,8 @@ def run_agent(
         if not _is_retryable_llm_error(primary_err):
             raise
         # Fallback model chain (AFRIKIA_FALLBACK_MODELS, e.g.
-        # "nemotron-3-nano,qwen2.5-7b"): same provider, same key — only the
-        # model changes when the primary's upstream is down.
+        # "qwen2.5-7b"): same provider, same key — only the model changes when
+        # the primary's upstream is down.
         chain_raw = getattr(config, "AFRIKIA_FALLBACK_MODELS", "") or ""
         chain = [m.strip() for m in chain_raw.split(",") if m.strip()]
         last_err: Exception = primary_err

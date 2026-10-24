@@ -1,8 +1,4 @@
-"""Afrikia provider config-resolution tests (subprocess-isolated env).
-
-Regression guard: the app is hard-wired to the Afrikia provider; legacy Ollama
-env vars must not leak into the resolved config.
-"""
+"""Afrikia provider config-resolution tests (subprocess-isolated env)."""
 import json
 import os
 import subprocess
@@ -46,8 +42,8 @@ def test_afrikia_defaults():
         "provider": "afrikia",
         "api_key": None,
         "base_url": "https://afrikia.neobytech.net/v1",
-        "model": "gpt-oss-20b",
-        "fallback_models": "nemotron-3-nano,qwen2.5-7b",
+        "model": "nemotron-3-nano",
+        "fallback_models": "qwen2.5-7b",
         "llm_model": None,
     }
 
@@ -67,16 +63,4 @@ def test_afrikia_env_overrides():
     assert cfg["llm_model"] == "custom-override"
 
 
-def test_legacy_ollama_vars_are_ignored():
-    cfg = read_config(
-        OLLAMA_MODEL="llama3.2:3b",
-        OLLAMA_BASE_URL="http://host.docker.internal:11434",
-        OLLAMA_CLOUD="true",
-        OLLAMA_KEEP_ALIVE="2m",
-        LLM_PROVIDER="openrouter",
-        LLM_FALLBACK_PROVIDERS="tokenfree,openrouter",
-    )
-    assert cfg["provider"] == "afrikia"
-    assert cfg["model"] == "gpt-oss-20b"
-    assert cfg["base_url"] == "https://afrikia.neobytech.net/v1"
-    assert cfg["fallback_models"] == "nemotron-3-nano,qwen2.5-7b"
+

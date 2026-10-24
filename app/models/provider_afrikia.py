@@ -1,7 +1,7 @@
 """Afrikia LLM provider — OpenAI-compatible API (https://afrikia.neobytech.net/v1).
 
-gpt-oss-20b and nemotron-3-nano are reasoning models: the chain-of-thought
-comes back as reasoning_content and never leaks into the user-facing content."""
+nemotron-3-nano is a reasoning model: the chain-of-thought comes back as
+reasoning_content and never leaks into the user-facing content."""
 from __future__ import annotations
 
 from typing import Any

@@ -325,13 +325,13 @@ def test_llm_fallback_model_kicks_in():
     saved = (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL)
     g.get_compiled_graph = _fake_compile
     config.LLM_MODEL = None
-    config.AFRIKIA_MODEL = "gpt-oss-20b"
-    config.AFRIKIA_FALLBACK_MODELS = "nemotron-3-nano"
+    config.AFRIKIA_MODEL = "nemotron-3-nano"
+    config.AFRIKIA_FALLBACK_MODELS = "qwen2.5-7b"
     try:
         res = g.run_agent(query="test", thread_id="fallback-test")
         assert res.get("_fresh_reply") == "réponse de secours", res.get("_fresh_reply")
         assert calls["n"] == 2, calls  # primary graph + fallback graph compiled
-        assert compiled_models == ["gpt-oss-20b", "nemotron-3-nano"], compiled_models
+        assert compiled_models == ["nemotron-3-nano", "qwen2.5-7b"], compiled_models
         # Without a fallback configured, the retryable error must propagate
         config.AFRIKIA_FALLBACK_MODELS = ""
         calls["n"] = 0
@@ -369,8 +369,8 @@ def test_llm_fallback_chain_order():
         def invoke(self, *a, **k):
             return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse qwen2.5-7b")]}
 
-    # compile #1 = primary (fails twice), #2 = nemotron-3-nano (fails once),
-    # #3 = qwen2.5-7b (wins)
+    # compile #1 = primary (fails twice), #2 = first fallback (fails once),
+    # #3 = second fallback (wins)
     graphs = [_FailGraph(), _FailGraph(), _OkGraph()]
     calls = {"n": 0}
     compiled_models = []
@@ -385,13 +385,13 @@ def test_llm_fallback_chain_order():
     saved = (config.AFRIKIA_MODEL, config.AFRIKIA_FALLBACK_MODELS, config.LLM_MODEL)
     g.get_compiled_graph = _fake_compile
     config.LLM_MODEL = None
-    config.AFRIKIA_MODEL = "gpt-oss-20b"
-    config.AFRIKIA_FALLBACK_MODELS = "nemotron-3-nano,qwen2.5-7b"
+    config.AFRIKIA_MODEL = "nemotron-3-nano"
+    config.AFRIKIA_FALLBACK_MODELS = "unconfigured-model,qwen2.5-7b"
     try:
         res = g.run_agent(query="test", thread_id="chain-test")
         assert res.get("_fresh_reply") == "réponse qwen2.5-7b", res.get("_fresh_reply")
         assert calls["n"] == 3, calls
-        assert compiled_models == ["gpt-oss-20b", "nemotron-3-nano", "qwen2.5-7b"], compiled_models
+        assert compiled_models == ["nemotron-3-nano", "unconfigured-model", "qwen2.5-7b"], compiled_models
 
         # An UNCONFIGURED middle fallback (ValueError, e.g. missing API key)
         # must be skipped — not block the rest of the chain.
@@ -497,7 +497,8 @@ def test_worker_nudge_appended_and_stripped():
     out = node(state)
 
     # The agent input ends with the nudge (HumanMessage) — this is what makes
-    # gpt-oss call tools instead of freestyling on the trailing NLU note.
+    # reasoning/harmony-format models call tools instead of freestyling on the
+    # trailing NLU note.
     assert isinstance(captured["msgs"][-1], HumanMessage)
     assert captured["msgs"][-1].content == g._WORKER_NUDGE
     assert isinstance(captured["msgs"][0], SystemMessage)

@@ -56,7 +56,7 @@ services:
       - API_BIND=0.0.0.0
       - AFRIKIA_API_KEY=${AFRIKIA_API_KEY:?Set AFRIKIA_API_KEY in .env (see .env.example)}
       - AFRIKIA_BASE_URL=${AFRIKIA_BASE_URL:-https://afrikia.neobytech.net/v1}
-      - AFRIKIA_MODEL=${AFRIKIA_MODEL:-gpt-oss-20b}
+      - AFRIKIA_MODEL=${AFRIKIA_MODEL:-nemotron-3-nano}
       - TZ=${TZ:-Africa/Abidjan}
     ports:
       - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
