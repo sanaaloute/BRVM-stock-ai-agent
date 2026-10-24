@@ -79,9 +79,7 @@ def _nlu_system_prompt() -> str:
 
 **Intent → suggested_worker:** market_overview|price_query|compare|metrics → analytics · chart → charts · news → news · prediction → prediction · scrape → scraper · update_timeseries → timeseries · portfolio_display|portfolio_add|portfolio_remove|tracking_list|tracking_add|target_set|target_list → portfolio · sgi → sgi · company_details → company_details · advice → advisor · general|brvm_basics → general
 
-**Output:**
-A) Unclear → CLARIFY: <question>
-B) Clear → {{"intent": "...", "entities": {{"symbol": "..."}} or {{}}, "suggested_worker": "..."}}"""
+**Output (one line, nothing else):** if unclear → CLARIFY: <short question in French> · otherwise exactly one JSON object, e.g. {{"intent": "price_query", "entities": {{"symbol": "NTLC"}}, "suggested_worker": "analytics"}}"""
 
 
 def _extract_user_text(messages: list) -> str:
@@ -125,13 +123,20 @@ def _worker_for(intent: str, raw_worker: str) -> tuple[str, list[str]]:
     return "general", []
 
 
+_CLARIFY_RE = re.compile(r"CLARIFY\s*:\s*(.+)", re.IGNORECASE)
+
+
+def _clean_clarification(text: str) -> str | None:
+    """Reject junk clarifications: template echoes ("<question>") and one-word
+    stubs some models emit instead of a real question."""
+    t = (text or "").strip().strip("\"' ").splitlines()[0].strip()
+    if len(t) < 12 or "<" in t or ">" in t:
+        return None
+    return t
+
+
 def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None]:
     text = (content or "").strip()
-    # Clarification: line starting with CLARIFY:
-    if text.upper().startswith("CLARIFY:"):
-        clarification = text[8:].strip()
-        if clarification:
-            return None, clarification
 
     def _make_structured(intent: str, entities: dict, raw_worker: str) -> tuple[dict[str, Any], str | None]:
         # Resolve and validate symbols against BRVM list; ask for clarification if unknown
@@ -182,8 +187,17 @@ def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None
                     except json.JSONDecodeError:
                         pass
                     break
-    # Fallback: treat as unclear
-    return None, "Pouvez-vous reformuler votre question ? Par exemple : « Quel est le cours de NTLC ? » ou « Graphique SLBC du 2025-01-01 au 2025-02-21 »."
+    # CLARIFY anywhere (models often prefix it, e.g. "A) CLARIFY: ..." or
+    # "unclear → CLARIFY: ..."). Junk/empty clarifications fall through.
+    m = _CLARIFY_RE.search(text)
+    if m:
+        clarification = _clean_clarification(m.group(1))
+        if clarification:
+            return None, clarification
+    # Unparseable: fall back to the general responder (it can still greet,
+    # explain and redirect) instead of a dead-end "please reformulate" loop.
+    logger.warning("[NLU] unparseable output, routing to general: %r", text[:300])
+    return {"intent": "general", "entities": {}, "suggested_worker": "general"}, None
 
 
 def _history_for_nlu(messages: list) -> list:
@@ -209,7 +223,9 @@ def run_nlu_node(state: dict, model: str) -> dict:
             "structured_data": None,
         }
 
-    llm = get_llm(model=model)
+    # Routing is a classification task: always temperature 0, whatever the
+    # deployment's LLM_TEMPERATURE (sampling here caused malformed outputs).
+    llm = get_llm(model=model, temperature=0.0)
 
     system = _nlu_system_prompt()
     # Give the NLU the recent conversation so it can resolve follow-ups
@@ -220,14 +236,23 @@ def run_nlu_node(state: dict, model: str) -> dict:
     ]
     reply = llm.invoke(prompt_messages)
     content = reply.content if hasattr(reply, "content") else str(reply)
+    logger.info("[NLU] raw reply: %r", str(content)[:300])
     structured_data, clarification = _parse_nlu_response(content)
 
     if clarification:
-        return {
-            "messages": messages,
-            "clarification": clarification,
-            "structured_data": None,
-        }
+        # Echo junk: some models parrot the user message back as the
+        # "clarifying question" — answer via the general responder instead.
+        _norm = lambda s: re.sub(r"[^\w\s]", "", (s or "").lower()).split()
+        if _norm(clarification) == _norm(user_text):
+            logger.warning("[NLU] clarification echoes the user message; routing to general: %r", clarification[:120])
+            clarification = None
+            structured_data = {"intent": "general", "entities": {}, "suggested_worker": "general"}
+        else:
+            return {
+                "messages": messages,
+                "clarification": clarification,
+                "structured_data": None,
+            }
 
     summary = f"[NLU] intent={structured_data.get('intent')}, entities={structured_data.get('entities')}, suggested_worker={structured_data.get('suggested_worker')}"
     new_messages = list(messages) + [AIMessage(content=summary)]

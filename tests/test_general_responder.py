@@ -64,6 +64,29 @@ def test_worker_alias_and_multi_passthrough():
     assert sd["suggested_worker"] == "", sd
 
 
+def test_parser_tolerates_label_prefixes_and_junk():
+    """Observed on weak deployment models: they echo the output-spec labels
+    ("A) CLARIFY: ...", "unclear → CLARIFY: ...") or emit prose. The parser
+    must extract what it can and NEVER dead-end on a reformulation loop."""
+    from app.agents.nlu_agent import _parse_nlu_response
+
+    # Label-prefixed CLARIFY still clarifies.
+    sd, clar = _parse_nlu_response("A) CLARIFY: Quel symbole voulez-vous consulter ?")
+    assert sd is None and clar == "Quel symbole voulez-vous consulter ?", clar
+
+    # Junk clarification ("comment" stub) -> general, not a useless question.
+    sd, clar = _parse_nlu_response("unclear → CLARIFY: comment")
+    assert clar is None and sd["suggested_worker"] == "general", (sd, clar)
+
+    # Pure prose -> general responder (never the reformulation dead-end).
+    sd, clar = _parse_nlu_response("Je ne suis pas sûr de comprendre la demande.")
+    assert clar is None and sd["intent"] == "general" and sd["suggested_worker"] == "general", (sd, clar)
+
+    # Label-prefixed JSON still parses.
+    sd, clar = _parse_nlu_response('B) {"intent": "price_query", "entities": {"symbol": "NTLC"}, "suggested_worker": "analytics"}')
+    assert clar is None and sd["suggested_worker"] == "analytics", (sd, clar)
+
+
 def test_company_name_resolved_in_code_not_prompt():
     from app.agents.nlu_agent import _parse_nlu_response
 

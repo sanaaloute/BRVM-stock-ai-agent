@@ -186,7 +186,7 @@ def _condense_to_user_final_pairs(messages: list) -> list:
 
 
 def _build_supervisor_node(model: str):
-    llm = get_llm(model=model)
+    llm = get_llm(model=model, temperature=0.0)
 
     def supervisor(state: AgentState) -> dict:
         logger.info("[GRAPH] node=supervisor start")
