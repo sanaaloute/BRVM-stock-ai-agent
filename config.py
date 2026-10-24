@@ -153,6 +153,12 @@ AFRIKIA_MODEL = os.getenv("AFRIKIA_MODEL", "nemotron-3-nano").strip() or "nemotr
 # the routing format (qwen2.5-7b misclassified greetings into clarify loops).
 AFRIKIA_FALLBACK_MODELS = os.getenv("AFRIKIA_FALLBACK_MODELS", "gemma4-e4b").strip()
 
+# Per-task model split: routing/classification (NLU + supervisor) is a strict-
+# format task — gemma4-e4b follows it best and is the fastest (1.2s vs 8.5s+).
+# Workers and the general responder keep the primary model (prose quality).
+# Empty = routing uses the primary model too.
+ROUTER_MODEL = os.getenv("ROUTER_MODEL", "gemma4-e4b").strip() or None
+
 # Optional: override the model for every agent (wins over AFRIKIA_MODEL).
 LLM_MODEL = os.getenv("LLM_MODEL", "").strip() or None
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0").strip() or "0.0")

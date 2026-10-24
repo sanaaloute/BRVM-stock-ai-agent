@@ -186,7 +186,9 @@ def _condense_to_user_final_pairs(messages: list) -> list:
 
 
 def _build_supervisor_node(model: str):
-    llm = get_llm(model=model, temperature=0.0)
+    # Same per-task split as the NLU: routing label output runs on
+    # ROUTER_MODEL (strict-format task), at temperature 0.
+    llm = get_llm(model=config.ROUTER_MODEL or model, temperature=0.0)
 
     def supervisor(state: AgentState) -> dict:
         logger.info("[GRAPH] node=supervisor start")

@@ -17,6 +17,8 @@ from app.models.llm import get_llm
 
 from app.utils.brvm_companies import normalize_entities
 
+import config
+
 from app.agents.utils import get_time_prefix
 
 
@@ -255,7 +257,9 @@ def run_nlu_node(state: dict, model: str) -> dict:
         }
 
     # Routing is a classification task: always temperature 0, whatever the
-    # deployment's LLM_TEMPERATURE (sampling here caused malformed outputs).
+    # deployment's LLM_TEMPERATURE (sampling here caused malformed outputs),
+    # and on ROUTER_MODEL when set (per-task split: gemma4-e4b routes best).
+    router_model = config.ROUTER_MODEL or model
     #
     # Pure greetings skip the classifier entirely: deterministic, instant,
     # and immune to weak models re-asking a pending question from history.
@@ -268,7 +272,7 @@ def run_nlu_node(state: dict, model: str) -> dict:
             "clarification": None,
         }
 
-    llm = get_llm(model=model, temperature=0.0)
+    llm = get_llm(model=router_model, temperature=0.0)
 
     system = _nlu_system_prompt()
     # Give the NLU the recent conversation so it can resolve follow-ups

@@ -114,6 +114,37 @@ def test_nlu_prompt_is_slim():
 
 # --- Graph fast path ---------------------------------------------------------
 
+def test_router_model_is_used_for_nlu():
+    """Per-task split: the NLU must call get_llm with config.ROUTER_MODEL, not
+    the run's primary model."""
+    import app.agents.nlu_agent as nlu_mod
+
+    captured: dict = {}
+
+    class _Capture:
+        def invoke(self, messages):
+            from langchain_core.messages import AIMessage as _AM
+            return _AM(content='{"intent": "general", "entities": {}, "suggested_worker": "general"}')
+
+    def _capture_get_llm(model=None, **k):
+        captured["model"] = model
+        return _Capture()
+
+    real = nlu_mod.get_llm
+    saved_router = config.ROUTER_MODEL
+    nlu_mod.get_llm = _capture_get_llm
+    config.ROUTER_MODEL = "gemma4-e4b"
+    try:
+        nlu_mod.run_nlu_node({"messages": [HumanMessage(content="c est quoi la brvm?")]}, model="nemotron-3-nano")
+        assert captured["model"] == "gemma4-e4b", captured
+        config.ROUTER_MODEL = None  # empty -> primary model
+        nlu_mod.run_nlu_node({"messages": [HumanMessage(content="c est quoi la brvm?")]}, model="nemotron-3-nano")
+        assert captured["model"] == "nemotron-3-nano", captured
+    finally:
+        nlu_mod.get_llm = real
+        config.ROUTER_MODEL = saved_router
+
+
 def test_pure_greeting_short_circuits_the_classifier():
     """Pure greetings must route to general WITHOUT any LLM call (weak models
     kept re-asking the pending question from history instead)."""
