@@ -127,10 +127,11 @@ class RouterFake(GenericFakeChatModel):
 
         blob = " ".join(str(m.content) for m in messages)[:4000]
         if "BRVM stock assistant NLU" in blob:
-            # suggested_worker="multi" is invalid -> forces the supervisor LLM call
+            # NLU multi-intent: routed straight to the multi-worker via
+            # structured_data.multi_workers (no supervisor LLM call).
             msg = AIMessage(
                 content='{"intent": "portfolio_add", "entities": {"symbol": "NTLC", '
-                '"buy_price": 50000, "buy_date": "2025-01-15"}, "suggested_worker": "multi"}'
+                '"buy_price": 50000, "buy_date": "2025-01-15"}, "suggested_worker": "analytics,portfolio"}'
             )
         elif "BRVM router" in blob:
             msg = AIMessage(content="ANALYTICS,PORTFOLIO")  # parallel multi-worker

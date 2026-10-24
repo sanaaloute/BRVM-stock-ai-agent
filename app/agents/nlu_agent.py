@@ -1,4 +1,8 @@
-"""NLU: intent/entity extraction, clarification, suggested_worker."""
+"""NLU: intent/entity extraction, clarification, suggested_worker.
+
+The prompt stays minimal by design: company-name/symbol resolution is done in
+CODE (app.utils.brvm_companies.normalize_entities), not by the model reading a
+47-company list on every message. The model only copies the mention as written."""
 from __future__ import annotations
 
 import json
@@ -11,48 +15,73 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 logger = logging.getLogger(__name__)
 from app.models.llm import get_llm
 
-import config
-from app.utils.brvm_companies import (
-    format_list_for_prompt,
-    normalize_entities,
-)
+from app.utils.brvm_companies import normalize_entities
 
 from app.agents.utils import get_time_prefix
 
 
+# Valid routing targets. "general" = no data, no specialist worker: greetings,
+# chitchat, finance/BRVM education (handled by the general responder node).
+VALID_WORKERS = frozenset({
+    "scraper", "analytics", "timeseries", "charts", "news", "portfolio",
+    "prediction", "sgi", "company_details", "advisor", "general",
+})
+
+# Near-miss labels the model sometimes emits; normalized before validation.
+_WORKER_ALIASES = {
+    "scrape": "scraper",
+    "chart": "charts",
+    "company": "company_details",
+    "company_detail": "company_details",
+    "advice": "advisor",
+    "finish": "general",
+    "none": "general",
+}
+
+# Deterministic intent -> worker fallback (used when the model omits or
+# misspells suggested_worker). Never default to a data worker blindly.
+_INTENT_WORKER = {
+    "market_overview": "analytics",
+    "price_query": "analytics",
+    "compare": "analytics",
+    "metrics": "analytics",
+    "chart": "charts",
+    "news": "news",
+    "prediction": "prediction",
+    "scrape": "scraper",
+    "update_timeseries": "timeseries",
+    "portfolio_display": "portfolio",
+    "portfolio_add": "portfolio",
+    "portfolio_remove": "portfolio",
+    "tracking_list": "portfolio",
+    "tracking_add": "portfolio",
+    "target_set": "portfolio",
+    "target_list": "portfolio",
+    "sgi": "sgi",
+    "company_details": "company_details",
+    "advice": "advisor",
+    "brvm_basics": "general",
+    "general": "general",
+}
+
+
 def _nlu_system_prompt() -> str:
-    brvm_list = format_list_for_prompt()
     return f"""BRVM stock assistant NLU. Output CLARIFY or JSON only. F CFA. {get_time_prefix()}
 
-**CRITICAL - Multi-turn context:** You receive the recent conversation (user/assistant turns) followed by the CURRENT user message. Use the history to resolve short follow-ups, pronouns ("it", "that stock", "celle-là", "son cours"), and bare symbols or values:
-- If the previous assistant message asked a question (e.g. which stock to add to the portfolio, which period for a chart) and the user replies with a symbol or value, output the intent that question was serving (e.g. portfolio_add with that symbol) — do NOT treat it as a new independent query.
-- If the current message refers to something discussed earlier (e.g. "et son dividende ?" after talking about ETIT), reuse the relevant entities from history.
-- Only treat the current message as independent when it clearly starts a new topic.
+**Context:** recent turns precede the CURRENT user message — resolve follow-ups, pronouns ("celle-là", "son cours") and bare values (symbol, date, price) against them: a bare value answering a bot question continues that question's intent (portfolio_add, chart...). Only a clearly new topic is treated independently.
 
-**BRVM symbols only:** (for when the user names a specific company or symbol)
-{brvm_list}
-Unknown symbol or other exchange → CLARIFY.
+**Rules:**
+- Copy symbol/company mentions AS WRITTEN into entities.symbol (validated downstream). NEVER invent a symbol. Another exchange than BRVM → CLARIFY.
+- Greetings, chitchat, finance/BRVM education (what is a dividend, how the stock market works, c'est quoi la BRVM, how to invest) → intent general: NO data, NO worker needed.
+- How-to questions about this assistant (portfolio, tracking list, price alerts) → CLARIFY: a short explanation (2-3 sentences: how it works, what info is needed) + a follow-up question inviting the user to do it now.
+- Compound request with ALL details given → output the intents directly (multi: "suggested_worker": "analytics,news", max 2). Clarify only when required details are MISSING.
+- CLARIFY questions are short and in FRENCH.
 
-**Company names:** when the user names a company from this list (e.g. SONATEL, Nestlé, Solibra, Ecobank), map it to its symbol DIRECTLY (intent company_details/price_query etc., entities.symbol set) — do NOT CLARIFY. Clarify only when the name is absent from the list or truly ambiguous between several listed companies.
-
-**General market questions (NO symbol required):** For "most expensive stock", "highest price stock", "lowest price stock", "cheapest stock", "what is the cheapest?", "should I buy the lowest price stock?" — use intent **market_overview**, suggested_worker **analytics**, and leave entities empty or omit symbol. Do NOT ask for a symbol; the analytics worker will compute from all BRVM stocks.
-
-**How-to questions about this assistant (portfolio, tracking list, price alerts):** When the user asks HOW to do something (e.g. "comment ajouter une action à mon portefeuille ?", "how do I set a price alert?"), the question deserves an ANSWER, not just a bare counter-question. Reply with `CLARIFY:` followed by BOTH:
-1. A short explanation (2-3 sentences) of how the feature works and what info is needed, and
-2. A follow-up question inviting the user to do it now (asking for the missing details: symbol, buy price/date, target price...).
-Example — User: "Comment ajouter une action à mon portefeuille ?"
-CLARIFY: Pour ajouter une action à votre portefeuille, donnez-moi simplement son symbole BRVM (ex. ETIT, NTLC, SNTS). Idéalement, précisez aussi le prix et la date d'achat pour un suivi de performance précis. Quelle action voulez-vous ajouter ?
-
-**Compound action requests:** when the user gives ALL the information in one message (e.g. "ajoute SNTS à ma liste de suivi puis préviens-moi quand NTLC atteint 18000"), do NOT ask for confirmation — output the intents directly (multi-intent is fine: tracking_add + target_set with their entities). Clarify only when required details are MISSING (symbol, price, date).
-
-**Intents (exact):** market_overview | price_query | compare | chart | metrics | news | prediction | scrape | update_timeseries | brvm_basics | portfolio_display | portfolio_add | portfolio_remove | tracking_list | tracking_add | target_set | target_list | sgi | company_details | advice | general
-
-**Worker:** analytics (prices, compare, stats, overview) | charts (plot) | timeseries (CSV) | scraper (raw fetch) | news | prediction (trends, hausse/baisse/neutre, technical prediction for a stock) | portfolio | sgi (courtiers BRVM, liste SGI, où ouvrir un compte, tarifs courtiers) | company_details (fiche société: actionnaires, dividende, résultat net, croissance, BNPA, PER, présentation, dirigeants) | advisor (conseil investissement: quelle action acheter, faut-il vendre NTLC, top actions BRVM, avis sur mon portefeuille; portfolio = add/remove/list)
-**Advice:** "quelle action acheter ?" → {{"intent": "advice", "entities": {{}}, "suggested_worker": "advisor"}}
+**Intent → suggested_worker:** market_overview|price_query|compare|metrics → analytics · chart → charts · news → news · prediction → prediction · scrape → scraper · update_timeseries → timeseries · portfolio_display|portfolio_add|portfolio_remove|tracking_list|tracking_add|target_set|target_list → portfolio · sgi → sgi · company_details → company_details · advice → advisor · general|brvm_basics → general
 
 **Output:**
-A) Unclear → CLARIFY: <short question>
-B) Clear → {{"intent": "...", "entities": {{"symbol": "NTLC", ...}} or {{}}, "suggested_worker": "analytics"}}"""
+A) Unclear → CLARIFY: <question>
+B) Clear → {{"intent": "...", "entities": {{"symbol": "..."}} or {{}}, "suggested_worker": "..."}}"""
 
 
 def _extract_user_text(messages: list) -> str:
@@ -62,6 +91,40 @@ def _extract_user_text(messages: list) -> str:
     return ""
 
 
+def _resolve_worker(raw: str) -> str | None:
+    """Normalize a single worker label; None when unknown."""
+    norm = re.sub(r"\s+", "_", (raw or "").strip().lower())
+    norm = _WORKER_ALIASES.get(norm, norm)
+    return norm if norm in VALID_WORKERS else None
+
+
+def _worker_for(intent: str, raw_worker: str) -> tuple[str, list[str]]:
+    """Resolve (worker, multi_workers) from NLU output.
+
+    Multi mode only when suggested_worker is labels joined by , or | (max 2;
+    general/timeseries are never auto-chained). Missing/invalid label →
+    deterministic intent map; last resort → general (never a data worker).
+    """
+    raw = (raw_worker or "").strip()
+    if "," in raw or "|" in raw:
+        seen: list[str] = []
+        for part in re.split(r"[,|]", raw):
+            w = _resolve_worker(part)
+            if w and w not in ("general", "timeseries") and w not in seen:
+                seen.append(w)
+        if len(seen) >= 2:
+            return "", seen[:2]
+        if len(seen) == 1:
+            return seen[0], []
+    w = _resolve_worker(raw)
+    if w:
+        return w, []
+    mapped = _INTENT_WORKER.get((intent or "").strip().lower())
+    if mapped:
+        return mapped, []
+    return "general", []
+
+
 def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None]:
     text = (content or "").strip()
     # Clarification: line starting with CLARIFY:
@@ -69,8 +132,8 @@ def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None
         clarification = text[8:].strip()
         if clarification:
             return None, clarification
-    # Try to find JSON in the response (allow nested braces for "entities")
-    def _make_structured(intent: str, entities: dict, worker: str) -> tuple[dict[str, Any], str | None]:
+
+    def _make_structured(intent: str, entities: dict, raw_worker: str) -> tuple[dict[str, Any], str | None]:
         # Resolve and validate symbols against BRVM list; ask for clarification if unknown
         entities, unknown = normalize_entities(entities)
         if unknown:
@@ -78,20 +141,28 @@ def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None
                 None,
                 f"Société ou symbole introuvable sur la BRVM : {', '.join(unknown)}. Utilisez un symbole de la liste BRVM (ex. NTLC, SLBC, SNTS, Sonatel, Solibra, Nestlé).",
             )
-        return {
+        worker, multi_workers = _worker_for(intent, raw_worker)
+        structured: dict[str, Any] = {
             "intent": intent,
             "entities": entities,
             "suggested_worker": worker,
-        }, None
+        }
+        if multi_workers:
+            structured["multi_workers"] = multi_workers
+        return structured, None
+
+    def _from_dict(data: dict) -> tuple[dict[str, Any], str | None] | None:
+        if not isinstance(data, dict) or "intent" not in data:
+            return None
+        intent = data.get("intent") or "general"
+        entities = data.get("entities") if isinstance(data.get("entities"), dict) else {}
+        return _make_structured(intent, entities, data.get("suggested_worker") or "")
 
     for candidate in (text.strip(), re.sub(r"^.*?(\{)", r"\1", text, count=1)):
         try:
-            data = json.loads(candidate)
-            if isinstance(data, dict) and "intent" in data:
-                intent = data.get("intent") or "general"
-                entities = data.get("entities") if isinstance(data.get("entities"), dict) else {}
-                worker = data.get("suggested_worker") or "analytics"
-                return _make_structured(intent, entities, worker)
+            parsed = _from_dict(json.loads(candidate))
+            if parsed:
+                return parsed
         except json.JSONDecodeError:
             pass
     # Find first { and match balanced braces
@@ -105,12 +176,9 @@ def _parse_nlu_response(content: str) -> tuple[dict[str, Any] | None, str | None
                 depth -= 1
                 if depth == 0:
                     try:
-                        data = json.loads(text[start : i + 1])
-                        if isinstance(data, dict) and "intent" in data:
-                            intent = data.get("intent") or "general"
-                            entities = data.get("entities") if isinstance(data.get("entities"), dict) else {}
-                            worker = data.get("suggested_worker") or "analytics"
-                            return _make_structured(intent, entities, worker)
+                        parsed = _from_dict(json.loads(text[start : i + 1]))
+                        if parsed:
+                            return parsed
                     except json.JSONDecodeError:
                         pass
                     break

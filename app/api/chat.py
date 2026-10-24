@@ -43,13 +43,14 @@ def _needs_footer(result: dict, clarification: bool) -> bool:
     """Decide whether the AI disclaimer footer applies to this turn.
 
     Skipped for clarifications (the bot only asks a question back) and for
-    chitchat classified as intent "general" by the NLU. When the intent is
-    unknown (no structured_data), keep the footer — safe default.
+    chitchat/educational answers (NLU intents "general"/"brvm_basics"), which
+    carry no generated financial content. When the intent is unknown (no
+    structured_data), keep the footer — safe default.
     """
     if clarification:
         return False
     data = result.get("structured_data")
-    if isinstance(data, dict) and (data.get("intent") or "").strip().lower() == "general":
+    if isinstance(data, dict) and (data.get("intent") or "").strip().lower() in ("general", "brvm_basics"):
         return False
     return True
 

@@ -42,6 +42,7 @@ from app.agents.prediction_agent import create_prediction_agent, get_prediction_
 from app.agents.sgi_agent import create_sgi_agent, get_sgi_agent_system
 from app.agents.company_details_agent import create_company_details_agent, get_company_details_agent_system
 from app.agents.advisor_agent import create_advisor_agent, get_advisor_agent_system
+from app.agents.general_agent import create_general_node
 
 # Keep only the last N condensed messages (user + final AI pairs) per thread.
 # Configurable via MEMORY_MAX_MESSAGES env var (default 20 = 10 exchanges).
@@ -62,9 +63,10 @@ SUPERVISOR_SYSTEM_TEMPLATE = """BRVM router. Output one label only. {time_line}
 - SGI — Brokers/courtiers BRVM (liste des SGI, où ouvrir un compte, tarifs, contacts)
 - COMPANY_DETAILS — Single-company fiche société: actionnaires, dividende, résultat net, croissance, BNPA, PER, présentation, dirigeants (Sika Finance; data cached per symbol)
 - ADVISOR — investment advice: which stocks to buy/sell/hold, sell-or-keep questions on a symbol, portfolio advice (quelle action acheter, faut-il vendre X, conseils)
-- FINISH — Done, greeting, or off-topic
+- GENERAL — greeting, chitchat, or general finance/BRVM knowledge question needing NO data (what is BRVM, what is a dividend, how the stock market works, how to use this assistant)
+- FINISH — Done, or off-topic
 
-**Output:** Reply with ONLY the label(s), nothing else — one of SCRAPER | ANALYTICS | TIMESERIES | CHARTS | NEWS | PREDICTION | PORTFOLIO | SGI | COMPANY_DETAILS | ADVISOR | FINISH
+**Output:** Reply with ONLY the label(s), nothing else — one of SCRAPER | ANALYTICS | TIMESERIES | CHARTS | NEWS | PREDICTION | PORTFOLIO | SGI | COMPANY_DETAILS | ADVISOR | GENERAL | FINISH
 (For multi: ANALYTICS,NEWS or SCRAPER|CHARTS — max 2 workers, do NOT include TIMESERIES in multi.)"""
 
 # Appended to every worker system prompt: absolute anti-hallucination rule.
@@ -115,6 +117,7 @@ WORKER_LABELS: dict[str, WorkerName] = {
     "SGI": "sgi",
     "COMPANY_DETAILS": "company_details",
     "ADVISOR": "advisor",
+    "GENERAL": "general",
 }
 
 _MULTI_SPLIT_RE = re.compile(r"[,|]")
@@ -134,8 +137,9 @@ def _parse_next(response: str) -> tuple[NextWorker, list[WorkerName], bool]:
         labels = [_label_to_worker(p) for p in parts]
         # Enter multi mode only if every token between separators is a known label.
         if len(parts) >= 2 and all(lbl is not None for lbl in labels):
-            # TIMESERIES should not be auto-chained with other workers; it is for explicit CSV maintenance only.
-            workers = [w for w in labels if w and w != "FINISH" and w != "timeseries"]
+            # TIMESERIES/GENERAL should not be auto-chained with other workers
+            # (CSV maintenance / chitchat don't combine with data workers).
+            workers = [w for w in labels if w and w not in ("FINISH", "timeseries", "general")]
             if workers:
                 return "FINISH", workers[:2], "|" not in text
     # Single
@@ -220,8 +224,18 @@ def _build_supervisor_node(model: str):
                 "multi_parallel": False,
             }
         if structured_data and "[NLU]" in str(last_content):
+            # Multi-intent from the NLU ("cours NTLC et les news") goes straight
+            # to the multi-worker, no supervisor LLM call.
+            nlu_multi = [w for w in (structured_data.get("multi_workers") or []) if w in WORKER_LABELS.values()]
+            if len(nlu_multi) >= 2:
+                return {
+                    "messages": messages,
+                    "next": "FINISH",
+                    "multi_workers": nlu_multi[:2],
+                    "multi_parallel": True,
+                }
             suggested = (structured_data.get("suggested_worker") or "").strip().lower()
-            if suggested in ("scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor"):
+            if suggested in ("scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor", "general"):
                 return {
                     "messages": messages,
                     "next": suggested,
@@ -376,7 +390,7 @@ def route_after_nlu(state: AgentState) -> Literal["supervisor", "__end__"]:
 
 def route_after_supervisor(
     state: AgentState,
-) -> Literal["scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor", "multi_worker", "__end__"]:
+) -> Literal["scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor", "general", "multi_worker", "__end__"]:
     multi = state.get("multi_workers") or []
     if multi:
         return "multi_worker"
@@ -401,6 +415,8 @@ def route_after_supervisor(
         return "company_details"
     if next_ == "advisor":
         return "advisor"
+    if next_ == "general":
+        return "general"
     return "__end__"
 
 
@@ -427,7 +443,7 @@ def _build_multi_worker_node(
         image_path = state.get("image_path")
         image_paths: list[str] = list(state.get("image_paths") or [])
         image_caption = state.get("image_caption")
-        valid = {"scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor"}
+        valid = {"scraper", "analytics", "timeseries", "charts", "news", "portfolio", "prediction", "sgi", "company_details", "advisor", "general"}
         workers = [w for w in workers if w in valid and w in worker_nodes]
 
         if parallel:
@@ -519,6 +535,7 @@ def create_master_graph(model: str | None = None, checkpointer: Any | None = Non
     sgi_n = _build_worker_node(create_sgi_agent, model, worker_name="sgi", prepend_system=get_sgi_agent_system)
     company_details_n = _build_worker_node(create_company_details_agent, model, worker_name="company_details", prepend_system=get_company_details_agent_system)
     advisor_n = _build_worker_node(create_advisor_agent, model, worker_name="advisor", prepend_system=get_advisor_agent_system)
+    general_n = create_general_node(model)
 
     builder.add_node("scraper", scraper_n)
     builder.add_node("analytics", analytics_n)
@@ -530,6 +547,7 @@ def create_master_graph(model: str | None = None, checkpointer: Any | None = Non
     builder.add_node("sgi", sgi_n)
     builder.add_node("company_details", company_details_n)
     builder.add_node("advisor", advisor_n)
+    builder.add_node("general", general_n)
 
     worker_nodes_map["scraper"] = scraper_n
     worker_nodes_map["analytics"] = analytics_n
@@ -541,6 +559,7 @@ def create_master_graph(model: str | None = None, checkpointer: Any | None = Non
     worker_nodes_map["sgi"] = sgi_n
     worker_nodes_map["company_details"] = company_details_n
     worker_nodes_map["advisor"] = advisor_n
+    worker_nodes_map["general"] = general_n
 
     builder.add_node("multi_worker", _build_multi_worker_node(worker_nodes_map, model))
 
@@ -557,6 +576,7 @@ def create_master_graph(model: str | None = None, checkpointer: Any | None = Non
     builder.add_edge("sgi", "supervisor")
     builder.add_edge("company_details", "supervisor")
     builder.add_edge("advisor", "supervisor")
+    builder.add_edge("general", "supervisor")
     builder.add_edge("multi_worker", "supervisor")
 
     cp = checkpointer if checkpointer is not None else MemorySaver()
@@ -716,11 +736,14 @@ def run_agent(
                 if (
                     result["_fresh_reply"] is None
                     and not result.get("image_path")
+                    and result.get("last_worker")
                     and attempt < attempts - 1
                 ):
-                    # The model produced only guarded junk (harmony fragments /
-                    # JSON blobs — intermittent with some models). Re-roll once
-                    # on the same provider before giving up.
+                    # A worker ran but the model produced only guarded junk
+                    # (harmony fragments / JSON blobs — intermittent with some
+                    # models). Re-roll once on the same provider before giving
+                    # up. When NO worker ran (pure FINISH route), re-running the
+                    # graph would just double the latency for the same outcome.
                     logger.warning("Run produced no usable reply (model junk); re-rolling once.")
                     time.sleep(1.0)
                     continue

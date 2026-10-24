@@ -158,6 +158,12 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.0").strip() or "0.0")
 LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120").strip() or "120")
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1").strip() or "1")
 
+# Reasoning ("thinking") mode for reasoning models like nemotron-3-nano: the
+# hidden chain-of-thought multiplies every call's latency (~5x measured) and is
+# not needed for routing/classification or short factual answers. Off by
+# default; set LLM_THINKING=1 to re-enable.
+LLM_THINKING = os.getenv("LLM_THINKING", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # Optional Ollama Cloud key — scraper web_fetch/web_search fallback ONLY
 # (app/utils/ollama_web.py, used when Tavily fails). The chat LLM never uses Ollama.
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip() or None

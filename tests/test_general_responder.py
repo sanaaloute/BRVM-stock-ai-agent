@@ -1,0 +1,192 @@
+"""General responder + slim NLU routing tests.
+
+Covers the fast path for messages that need NO data and NO specialist worker
+(greetings, finance/BRVM education): the NLU prompt stays small (company-name
+resolution lives in code), general/brvm_basics intents route to the general
+responder in exactly 2 LLM calls (NLU + answer, supervisor skipped), and
+get_llm(thinking=False) asks the provider to skip the reasoning chain.
+
+Run:
+    .venv/bin/python -m pytest tests/test_general_responder.py
+"""
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel  # noqa: E402
+from langchain_core.messages import AIMessage  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
+from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
+
+import config  # noqa: E402
+config.DATABASE_URL = ""  # force SQLite regardless of local .env
+
+from app.utils import user_db  # noqa: E402
+
+
+# --- NLU parsing / routing ---------------------------------------------------
+
+def test_missing_or_invalid_worker_uses_intent_map():
+    from app.agents.nlu_agent import _parse_nlu_response
+
+    # No suggested_worker at all: intent map decides (never a blind data worker).
+    sd, clar = _parse_nlu_response('{"intent": "general", "entities": {}}')
+    assert clar is None and sd["suggested_worker"] == "general", sd
+
+    sd, _ = _parse_nlu_response('{"intent": "brvm_basics", "entities": {}}')
+    assert sd["suggested_worker"] == "general", sd
+
+    sd, _ = _parse_nlu_response('{"intent": "price_query", "entities": {}}')
+    assert sd["suggested_worker"] == "analytics", sd
+
+    # Unknown intent + unknown worker -> general (safe: no data tools there).
+    sd, _ = _parse_nlu_response('{"intent": "xyzzy", "entities": {}, "suggested_worker": "bogus"}')
+    assert sd["suggested_worker"] == "general", sd
+
+
+def test_worker_alias_and_multi_passthrough():
+    from app.agents.nlu_agent import _parse_nlu_response
+
+    # "scrape" is a near-miss label the model emits for "scraper".
+    sd, _ = _parse_nlu_response(
+        '{"intent": "price_query", "entities": {"symbol": "NTLC"}, "suggested_worker": "scrape"}'
+    )
+    assert sd["suggested_worker"] == "scraper", sd
+
+    # Compound request: multi workers travel via structured_data.multi_workers.
+    sd, _ = _parse_nlu_response(
+        '{"intent": "price_query", "entities": {"symbol": "NTLC"}, "suggested_worker": "analytics,news"}'
+    )
+    assert sd["multi_workers"] == ["analytics", "news"], sd
+    assert sd["suggested_worker"] == "", sd
+
+
+def test_company_name_resolved_in_code_not_prompt():
+    from app.agents.nlu_agent import _parse_nlu_response
+
+    # The NLU copies the mention as written; normalize_entities maps it.
+    sd, clar = _parse_nlu_response(
+        '{"intent": "price_query", "entities": {"symbol": "Sonatel"}, "suggested_worker": "analytics"}'
+    )
+    assert clar is None, clar
+    assert sd["entities"]["symbol"] == "SNTS", sd
+
+
+def test_nlu_prompt_is_slim():
+    from app.agents.nlu_agent import _nlu_system_prompt
+
+    prompt = _nlu_system_prompt()
+    assert len(prompt) < 2500, f"NLU prompt grew back to {len(prompt)} chars"
+    # The 47-company list must NOT be inlined (spot-check a few entries).
+    for token in ("SONATEL", "Solibra", "Nestlé"):
+        assert token not in prompt, f"company list leaked into NLU prompt ({token})"
+
+
+# --- Graph fast path ---------------------------------------------------------
+
+LLM_CALLS = {"n": 0}
+
+
+class GeneralFake(GenericFakeChatModel):
+    """Content-routed fake: NLU -> general intent; general responder -> greeting."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("messages", iter([AIMessage(content="unused")]))
+        super().__init__(**kwargs)
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        LLM_CALLS["n"] += 1
+        blob = " ".join(str(m.content) for m in messages)[:8000]
+        if "BRVM stock assistant NLU" in blob:
+            msg = AIMessage(content='{"intent": "general", "entities": {}, "suggested_worker": "general"}')
+        elif "Assistant BRVM" in blob:
+            msg = AIMessage(content="Bonjour ! Je suis l'assistant BRVM, posez-moi vos questions.")
+        else:
+            raise RuntimeError("unexpected prompt: " + blob[:200])
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+def _patch_llm(fake):
+    import app.agents.graph as graph_mod
+    import app.agents.nlu_agent as nlu_mod
+    import app.agents.general_agent as general_mod
+    import app.agents.analytics_agent as analytics_mod
+    import app.agents.scraper_agent as scraper_mod
+    import app.agents.timeseries_agent as timeseries_mod
+    import app.agents.charts_agent as charts_mod
+    import app.agents.news_agent as news_mod
+    import app.agents.portfolio_agent as portfolio_mod
+    import app.agents.prediction_agent as prediction_mod
+    import app.agents.sgi_agent as sgi_mod
+    import app.agents.company_details_agent as company_details_mod
+
+    for mod in (graph_mod, nlu_mod, general_mod, analytics_mod, scraper_mod, timeseries_mod,
+                charts_mod, news_mod, portfolio_mod, prediction_mod, sgi_mod,
+                company_details_mod):
+        mod.get_llm = lambda *a, **k: fake
+
+
+def test_greeting_routes_to_general_responder():
+    user_db.DB_PATH = Path(tempfile.mkdtemp()) / "gen.db"
+    user_db.init_db()
+    LLM_CALLS["n"] = 0
+    _patch_llm(GeneralFake())
+
+    from app.agents.graph import run_agent
+
+    result = run_agent(
+        "bonjour",
+        model="fake",
+        thread_id="gen-e2e",
+        telegram_user_id=777,
+        checkpointer=MemorySaver(),
+    )
+    assert not result.get("clarification"), result.get("clarification")
+    assert result.get("_fresh_reply", "").startswith("Bonjour"), result.get("_fresh_reply")
+    assert (result.get("structured_data") or {}).get("intent") == "general"
+    # NLU (1) + general responder (1) = 2. The supervisor must be bypassed
+    # (suggested_worker shortcut) and must FINISH structurally after the node.
+    assert LLM_CALLS["n"] == 2, f"expected 2 LLM calls, got {LLM_CALLS['n']}"
+
+
+# --- LLM factory: thinking switch --------------------------------------------
+
+def test_thinking_flag_controls_extra_body_and_cache():
+    import app.models.llm as llm_mod
+
+    old_key = config.AFRIKIA_API_KEY
+    config.AFRIKIA_API_KEY = "test-key"
+    try:
+        fast = llm_mod.get_llm(model="m-fast", thinking=False)
+        assert fast.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}, fast.extra_body
+        think = llm_mod.get_llm(model="m-fast", thinking=True)
+        assert not getattr(think, "extra_body", None), getattr(think, "extra_body", None)
+        # Cached per (model, temperature, thinking):
+        assert llm_mod.get_llm(model="m-fast", thinking=False) is fast
+        assert think is not fast
+        # Caller-supplied extra_body is merged, not clobbered.
+        custom = llm_mod.get_llm(model="m-fast", thinking=False, extra_body={"top_k": 5})
+        assert custom.extra_body["top_k"] == 5
+        assert custom.extra_body["chat_template_kwargs"]["enable_thinking"] is False
+    finally:
+        config.AFRIKIA_API_KEY = old_key
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    failed = 0
+    for t in tests:
+        try:
+            t()
+            print(f"PASS {t.__name__}")
+        except Exception as e:
+            failed += 1
+            print(f"FAIL {t.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)

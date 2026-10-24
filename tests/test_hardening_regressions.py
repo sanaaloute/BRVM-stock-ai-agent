@@ -462,8 +462,11 @@ def test_junk_reply_rerolls_once():
         def invoke(self, *a, **k):
             self.calls += 1
             if self.calls == 1:
-                return {"messages": [HumanMessage(content="q"), AIMessage(content=", confidence=0.99")]}
-            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse propre")]}
+                # A worker ran (last_worker set) but emitted only guarded junk.
+                return {"messages": [HumanMessage(content="q"), AIMessage(content=", confidence=0.99")],
+                        "last_worker": "analytics"}
+            return {"messages": [HumanMessage(content="q"), AIMessage(content="réponse propre")],
+                    "last_worker": "analytics"}
 
     graph = _JunkThenGoodGraph()
     real_compile = g.get_compiled_graph
@@ -472,6 +475,41 @@ def test_junk_reply_rerolls_once():
         res = g.run_agent(query="test", thread_id="junk-test")
         assert res.get("_fresh_reply") == "réponse propre", res.get("_fresh_reply")
         assert graph.calls == 2, graph.calls
+    finally:
+        g.get_compiled_graph = real_compile
+
+
+def test_junk_reply_without_worker_does_not_reroll():
+    """No-worker route (pure FINISH): re-running the graph would double the
+    latency for the same outcome — the run must NOT re-roll."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import app.agents.graph as g
+
+    class _State:
+        values = {}
+
+    class _JunkNoWorkerGraph:
+        def __init__(self):
+            self.calls = 0
+
+        def get_state(self, cfg):
+            return _State()
+
+        def update_state(self, *a, **k):
+            pass
+
+        def invoke(self, *a, **k):
+            self.calls += 1
+            return {"messages": [HumanMessage(content="q"), AIMessage(content=", confidence=0.99")]}
+
+    graph = _JunkNoWorkerGraph()
+    real_compile = g.get_compiled_graph
+    g.get_compiled_graph = lambda **kwargs: graph
+    try:
+        res = g.run_agent(query="test", thread_id="junk-noworker-test")
+        assert res.get("_fresh_reply") is None, res.get("_fresh_reply")
+        assert graph.calls == 1, graph.calls
     finally:
         g.get_compiled_graph = real_compile
 

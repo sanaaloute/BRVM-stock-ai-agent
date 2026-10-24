@@ -30,7 +30,10 @@ from app.services import predictions, scoring  # noqa: E402
 from app.utils import user_db  # noqa: E402
 
 def _today_iso():
-    return date.today().isoformat()
+    # The predictions subsystem labels market days in UTC on purpose
+    # (app/utils/user_db._today_utc: UTC == local time for UEMOA users).
+    # Using local date.today() here breaks the assertions around midnight.
+    return datetime.now(timezone.utc).date().isoformat()
 JWT_SECRET = "test-jwt-secret-predictions"
 
 
