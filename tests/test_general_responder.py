@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel  # noqa: E402
-from langchain_core.messages import AIMessage  # noqa: E402
+from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 
@@ -114,6 +114,29 @@ def test_nlu_prompt_is_slim():
 
 # --- Graph fast path ---------------------------------------------------------
 
+def test_pure_greeting_short_circuits_the_classifier():
+    """Pure greetings must route to general WITHOUT any LLM call (weak models
+    kept re-asking the pending question from history instead)."""
+    import app.agents.nlu_agent as nlu_mod
+
+    for text in ["hi", "Salut !", "BONJOUR?", "comment ça va", "merci beaucoup", "Hello"]:
+        assert nlu_mod._is_pure_greeting(text), text
+    for text in ["salut, quel est le cours de SNTS ?", "bonjour je veux investir", "ca va et toi et le cours NTLC"]:
+        assert not nlu_mod._is_pure_greeting(text), text
+
+    def _exploding_get_llm(*a, **k):
+        raise AssertionError("greeting must not call the LLM")
+
+    real = nlu_mod.get_llm
+    nlu_mod.get_llm = _exploding_get_llm
+    try:
+        out = nlu_mod.run_nlu_node({"messages": [HumanMessage(content="hi")]}, model="fake")
+    finally:
+        nlu_mod.get_llm = real
+    assert out["clarification"] is None
+    assert out["structured_data"]["suggested_worker"] == "general", out["structured_data"]
+
+
 LLM_CALLS = {"n": 0}
 
 
@@ -177,9 +200,10 @@ def test_greeting_routes_to_general_responder():
     assert not result.get("clarification"), result.get("clarification")
     assert result.get("_fresh_reply", "").startswith("Bonjour"), result.get("_fresh_reply")
     assert (result.get("structured_data") or {}).get("intent") == "general"
-    # NLU (1) + general responder (1) = 2. The supervisor must be bypassed
-    # (suggested_worker shortcut) and must FINISH structurally after the node.
-    assert LLM_CALLS["n"] == 2, f"expected 2 LLM calls, got {LLM_CALLS['n']}"
+    # "bonjour" is a pure greeting: the NLU classifier is skipped (0 calls) and
+    # only the general responder calls the LLM (1 call). The supervisor must be
+    # bypassed (suggested_worker shortcut) and FINISHes structurally after.
+    assert LLM_CALLS["n"] == 1, f"expected 1 LLM call, got {LLM_CALLS['n']}"
 
 
 # --- LLM factory: thinking switch --------------------------------------------
