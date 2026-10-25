@@ -1,0 +1,78 @@
+APP STORE CONNECT — FICHE PRODUIT "Kora Bourse"
+================================================
+Bundle ID : com.neobytech.korabourse
+Version : 1.5.0 (build 8)
+
+NOM DE L'APP (30 car. max) :
+Kora Bourse
+
+SOUS-TITRE (30 car. max) :
+Bourse BRVM & assistant IA
+
+CATÉGORIE PRINCIPALE : Finance
+CATÉGORIE SECONDAIRE : Actualités
+
+MOTS-CLÉS (100 car. max, séparés par virgules, sans espaces inutiles) :
+BRVM,bourse,actions,Abidjan,FCFA,UEMOA,investissement,portefeuille,alertes,SGI,dividendes,Côte d'Ivoire
+
+URL POLITIQUE DE CONFIDENTIALITÉ :
+https://kbourse.neobytech.net/privacy
+
+URL D'ASSISTANCE (support) :
+https://kbourse.neobytech.net/privacy
+
+DESCRIPTION (4000 car. max) :
+Kora Bourse — votre agent boursier intelligent pour la bourse régionale d'Afrique de l'Ouest.
+
+Suivez la BRVM, analysez les actions et gérez votre portefeuille depuis votre poche, avec l'aide de Kora, un assistant IA qui parle votre langue et connaît le marché.
+
+KORA, L'ASSISTANT IA
+Posez vos questions en français : « Quel est le palmarès du jour ? », « Analyse-moi la SONATEL », « Faut-il vendre mes ETIT ? ». Kora répond avec les cours, les chiffres et des graphiques — et se souvient de vos conversations.
+
+LE MARCHÉ EN DIRECT
+• Palmarès complet de la bourse régionale : cours, variations, volumes, capitalisations
+• Recherche par symbole ou nom de société, filtres hausse/baisse, tris
+• Fiche détaillée de chaque action : graphique de cours interactif (1M à 5 ans), fondamentaux (PER, bêta, capitalisation), dividendes, actualités, prédiction technique et score
+• Liste de suivi personnalisée
+
+VOTRE PORTEFEUILLE
+Chaque achat est une ligne : enregistrez vos lots (prix, quantité, date) et Kora calcule automatiquement votre prix moyen, votre valorisation en FCFA et votre gain/perte. Idéal pour les achats échelonnés. Import possible de relevés SGI (PDF/DOCX) avec vérification avant import — le document n'est pas conservé.
+
+ALERTES DE PRIX
+Définissez un cours cible (au-dessus ou en dessous) sur n'importe quelle action et suivez les seuils atteints directement dans l'application.
+
+COURTIERS (SGI)
+Profils détaillés des Sociétés de Gestion et d'Intermédiation de la région : conditions d'ouverture de compte, montants minimums, contacts et sites web — pour choisir votre courtier en connaissance de cause.
+
+ACTUALITÉS & DIGEST
+Actualités du marché lisibles directement dans l'application, et résumé quotidien ou hebdomadaire du marché en un coup d'œil.
+
+SÉCURITÉ
+Compte protégé par mot de passe, connexions chiffrées HTTPS, données hébergées en toute confidentialité. Suppression du compte possible à tout moment depuis l'application.
+
+AVERTISSEMENT
+Kora Bourse est un outil d'information. Les contenus générés par l'assistant IA sont informatifs et ne constituent pas un conseil en investissement. La Bourse comporte des risques : investissez en connaissance de cause.
+
+Kora Bourse — l'intelligence du marché, à portée de main.
+
+TEXTE PROMOTIONNEL (170 car., modifiable sans nouvelle version) :
+Suivez la BRVM en direct, analysez chaque action avec l'IA et pilotez votre portefeuille en FCFA.
+
+NOUVEAUTÉS DE LA VERSION 1.5.0 (4000 car. max) :
+Première version iOS de Kora Bourse : marché BRVM en direct, assistant IA Kora, portefeuille avec import de relevés SGI, alertes de prix, actualités et digest quotidien.
+
+------------------------------------------------
+INFORMATIONS POUR LA RÉVISION (App Review)
+------------------------------------------------
+Identifiants de démonstration : <à renseigner — compte de production pour les réviseurs>
+Notes : L'application nécessite une connexion. Toutes les fonctionnalités sont accessibles
+avec le compte de démonstration fourni. Aucun achat intégré. L'assistant IA répond en français
+et affiche un avertissement indiquant qu'il ne s'agit pas de conseil en investissement.
+Contact : <email de contact de l'organisation>
+
+CLASSIFICATION D'ÂGE : 4+ (pas de contenu restreint ; l'app affiche des informations financières)
+
+DONNÉES COLLECTÉES (questionnaire confidentialité App Store) :
+• Coordonnées : adresse e-mail / numéro de téléphone (création de compte) — lié à l'identité
+• Contenu utilisateur : portefeuille saisi par l'utilisateur, conversations avec l'assistant — lié à l'identité
+• Pas de suivi publicitaire, pas de données vendues à des tiers.

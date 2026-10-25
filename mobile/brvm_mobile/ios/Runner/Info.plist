@@ -18,6 +18,8 @@
 	<string>Kora Bourse</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleShortVersionString</key>
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
@@ -31,6 +33,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Kora Bourse peut accéder à la caméra pour photographier un relevé SGI lors de l'import de positions dans le portefeuille. Aucune photo n'est conservée après l'import.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Kora Bourse peut accéder à votre photothèque pour importer un relevé SGI (capture d'écran ou image) afin d'ajouter vos positions au portefeuille. Aucune image n'est conservée après l'import.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Kora Bourse n'utilise pas votre position ; cette autorisation n'est jamais demandée par l'application.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

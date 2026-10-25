@@ -43,3 +43,13 @@ key.properties
 *.jks
 *.keystore
 mobile/dist/
+
+# Tooling caches / session artifacts
+.pytest_cache/
+.playwright-mcp/
+
+# Apple App Store Connect API keys / provisioning — never commit
+*.p8
+AuthKey_*
+*.mobileprovision
+scripts/asc_release.py
