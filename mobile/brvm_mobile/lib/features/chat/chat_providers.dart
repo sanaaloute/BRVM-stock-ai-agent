@@ -34,7 +34,6 @@ class ChatState {
     this.isSending = false,
     this.isLoadingHistory = false,
     this.error,
-    this.quotaRemaining,
   });
 
   final String? threadId;
@@ -42,7 +41,6 @@ class ChatState {
   final bool isSending;
   final bool isLoadingHistory;
   final String? error;
-  final int? quotaRemaining;
 
   ChatState copyWith({
     String? threadId,
@@ -50,7 +48,6 @@ class ChatState {
     bool? isSending,
     bool? isLoadingHistory,
     String? error,
-    int? quotaRemaining,
   }) =>
       ChatState(
         threadId: threadId ?? this.threadId,
@@ -58,7 +55,6 @@ class ChatState {
         isSending: isSending ?? this.isSending,
         isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
         error: error,
-        quotaRemaining: quotaRemaining ?? this.quotaRemaining,
       );
 }
 
@@ -76,6 +72,17 @@ final chatProvider = StateNotifierProvider.autoDispose
 /// Compteur incrémenté par « Nouvelle discussion » depuis l'historique :
 /// l'écran de chat racine rebuild avec une nouvelle conversation vierge.
 final chatEpochProvider = StateProvider<int>((ref) => 0);
+
+/// Questions suggérées sur une conversation vierge. Rechargées à chaque
+/// nouvelle session (epoch) et à chaque changement de compte ; le backend
+/// les génère à partir des données de marché du jour.
+final chatSuggestionsProvider = FutureProvider.autoDispose<List<String>>(
+  (ref) {
+    ref.watch(chatEpochProvider);
+    ref.watch(currentUserIdProvider);
+    return ref.watch(chatRepositoryProvider).getSuggestions();
+  },
+);
 
 class ChatNotifier extends StateNotifier<ChatState> {
   ChatNotifier(this._ref, String? initialThreadId)
@@ -178,7 +185,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
         messages: <ChatMessage>[...state.messages, aiMessage],
         isSending: false,
         threadId: response.threadId ?? state.threadId,
-        quotaRemaining: response.quotaRemaining,
       );
       // La nouvelle conversation apparaît dans la liste.
       _ref.invalidate(conversationsProvider);

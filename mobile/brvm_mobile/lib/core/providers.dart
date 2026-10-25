@@ -68,16 +68,37 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final user = await storage.readUser();
       final accessToken = await storage.readAccessToken();
-      if (user != null && accessToken != null && accessToken.isNotEmpty) {
+      // Un profil sans id (corrompu par un ancien /auth/refresh qui ne
+      // renvoyait pas l'utilisateur) est réparé via le renouvellement
+      // ci-dessous au lieu d'être utilisé tel quel : sans id, toutes les
+      // conversations fusionneraient sur le thread serveur par défaut.
+      if (user != null &&
+          user.id.isNotEmpty &&
+          accessToken != null &&
+          accessToken.isNotEmpty) {
         state = AuthAuthenticated(user);
         unawaited(_registerDevice());
         return;
       }
       final refreshToken = await storage.readRefreshToken();
       if (refreshToken != null && refreshToken.isNotEmpty) {
-        final session =
+        var session =
             await _ref.read(authRepositoryProvider).refresh(refreshToken);
         await storage.saveSession(session);
+        if (session.user.id.isEmpty) {
+          // Vieux backend sans profil dans /auth/refresh : le nouveau jeton
+          // d'accès est déjà stocké, /me permet de récupérer le profil.
+          try {
+            final fresh = await _ref.read(authRepositoryProvider).me();
+            if (fresh.id.isNotEmpty) {
+              session = session.copyWith(user: fresh);
+              await storage.saveSession(session);
+            }
+          } catch (_) {
+            // Réparation impossible : la session reste utilisable telle
+            // quelle (la prochaine connexion la corrigera).
+          }
+        }
         state = AuthAuthenticated(session.user);
         unawaited(_registerDevice());
         return;

@@ -3,6 +3,8 @@ import 'package:brvm_mobile/core/auth_repository.dart';
 import 'package:brvm_mobile/core/models/auth_user.dart';
 import 'package:brvm_mobile/core/providers.dart';
 import 'package:brvm_mobile/core/token_storage.dart';
+import 'package:brvm_mobile/features/portfolio/portfolio_models.dart';
+import 'package:brvm_mobile/features/portfolio/portfolio_providers.dart';
 import 'package:brvm_mobile/features/settings/settings_providers.dart';
 import 'package:brvm_mobile/features/settings/settings_screen.dart';
 import 'package:flutter/material.dart';
@@ -44,6 +46,19 @@ class _FakeSettingsRepository extends SettingsRepository {
   Future<Quota> getQuota() async => const Quota(used: 0, limit: 10);
 }
 
+class _FakePortfolioRepository extends PortfolioRepository {
+  _FakePortfolioRepository()
+      : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
+
+  @override
+  Future<PortfolioData> get({String? sgi}) async =>
+      PortfolioData.fromJson(const <String, dynamic>{
+        'summary': <String, dynamic>{'positions_count': 0},
+        'positions': <Map<String, dynamic>>[],
+        'sgi_breakdown': <Map<String, dynamic>>[],
+      });
+}
+
 void main() {
   Future<void> pumpScreen(
     WidgetTester tester, {
@@ -68,18 +83,23 @@ void main() {
           authRepositoryProvider.overrideWithValue(repo),
           settingsRepositoryProvider
               .overrideWithValue(_FakeSettingsRepository()),
+          portfolioRepositoryProvider
+              .overrideWithValue(_FakePortfolioRepository()),
         ],
         child: const MaterialApp(home: SettingsScreen()),
       ),
     );
     await tester.pumpAndSettle();
 
-    // ListView paresseux : faire défiler jusqu'au bouton pour le construire.
+    // ListView paresseux : faire défiler jusqu'au bouton pour le construire,
+    // puis l'aligner complètement dans le viewport avant le tap.
     await tester.scrollUntilVisible(
       find.text('Supprimer mon compte'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Supprimer mon compte'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Supprimer mon compte'));
     await tester.pumpAndSettle();
   }

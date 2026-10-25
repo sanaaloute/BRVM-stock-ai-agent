@@ -659,6 +659,82 @@ async def mobile_chat(body: MobileChatBody, user: dict = Depends(require_app_use
     return payload
 
 
+# --- Chat suggestions (fresh-conversation hints) --------------------------------
+
+_DEFAULT_CHAT_SUGGESTIONS = [
+    "Quel est le palmarès du jour ?",
+    "Analyse-moi l'action SONATEL",
+    "Quelles sont les perspectives du secteur bancaire ?",
+]
+
+# 30 min: suggestions follow the market snapshot/predictions, no need to
+# rebuild them per request (they are identical for all users).
+_CHAT_SUGGESTIONS_TTL = 1800.0
+_chat_suggestions_cache: dict[str, Any] = {"at": 0.0, "items": None}
+
+
+def _stock_label(symbol: str, name: Any = None) -> str:
+    label = str(name or "").strip() or symbol
+    return label
+
+
+def _build_chat_suggestions() -> list[str]:
+    """3 suggested questions derived from the latest market data: top mover of
+    the day, most confident AI prediction, market overview. Missing data is
+    backfilled from the generic defaults; the list always has 3 entries."""
+    suggestions: list[str] = []
+    try:
+        from app.services.market_data import palmares_for_api
+
+        def _variation(stock: dict[str, Any]) -> float:
+            v = stock.get("variation_pct", stock.get("variation"))
+            return float(v) if isinstance(v, (int, float)) else 0.0
+
+        movers = sorted(palmares_for_api() or [], key=_variation, reverse=True)
+        top = next(
+            (s for s in movers if _variation(s) > 0 and s.get("symbol")),
+            None,
+        )
+        if top is not None:
+            label = _stock_label(str(top["symbol"]).strip().upper(), top.get("name"))
+            suggestions.append(f"Analyse-moi l'action {label}")
+    except Exception:
+        pass
+    try:
+        rows = [r for r in user_db.get_latest_predictions() if r.get("symbol")]
+        if rows:
+            best = max(rows, key=lambda r: r.get("confidence_pct") or 0.0)
+            sym = str(best["symbol"]).strip().upper()
+            from app.utils.brvm_companies import get_symbol_to_name
+
+            label = _stock_label(sym, get_symbol_to_name().get(sym))
+            suggestions.append(f"Quelles sont les prévisions pour {label} ?")
+    except Exception:
+        pass
+    suggestions.append("Quel est le palmarès du jour ?")
+    for fallback in _DEFAULT_CHAT_SUGGESTIONS:
+        if len(suggestions) >= 3:
+            break
+        if fallback not in suggestions:
+            suggestions.append(fallback)
+    return suggestions[:3]
+
+
+@router.get("/chat/suggestions")
+def chat_suggestions(user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Contextual questions for the fresh chat screen (cached, all users share
+    the same market data)."""
+    import time
+
+    now = time.monotonic()
+    items = _chat_suggestions_cache["items"]
+    if items is None or now - _chat_suggestions_cache["at"] >= _CHAT_SUGGESTIONS_TTL:
+        items = _build_chat_suggestions()
+        _chat_suggestions_cache["items"] = items
+        _chat_suggestions_cache["at"] = now
+    return {"suggestions": items}
+
+
 # --- Conversations --------------------------------------------------------------
 
 def _thread_prefix(user: dict[str, Any]) -> str:

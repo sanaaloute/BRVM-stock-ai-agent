@@ -344,5 +344,37 @@ void main() {
       expect(adapter.requests.single.headers['Authorization'],
           'Bearer expired-token');
     });
+
+    test('refresh sans profil dans la réponse → utilisateur stocké conservé',
+        () async {
+      final storage = await storageWithSession();
+      final adapter = MockAdapter((options) {
+        if (options.path.contains('/auth/refresh')) {
+          // Ancien backend : pas de champ user dans la réponse de refresh.
+          return jsonResponse(<String, dynamic>{
+            'access_token': 'new-access',
+            'access_expires_in': 900,
+            'refresh_token': 'new-refresh',
+            'refresh_expires_in': 1209600,
+            'token_type': 'Bearer',
+          }, 200);
+        }
+        final auth = (options.headers['Authorization'] ?? '') as String;
+        if (auth == 'Bearer expired-token') {
+          return jsonResponse(<String, dynamic>{'detail': 'expired'}, 401);
+        }
+        return jsonResponse(<String, dynamic>{'ok': true}, 200);
+      });
+      final client = buildClient(adapter, storage: storage);
+
+      await client.get('/mobile/v1/portfolio');
+
+      // Le profil stocké (id compris) survit au renouvellement : sans lui,
+      // les nouvelles conversations perdraient leur préfixe app:{userId}.
+      final user = await storage.readUser();
+      expect(user?.id, 'u1');
+      expect(user?.email, 'a@b.co');
+      expect(await storage.readAccessToken(), 'new-access');
+    });
   });
 }

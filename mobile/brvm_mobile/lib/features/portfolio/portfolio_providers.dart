@@ -167,6 +167,15 @@ final portfolioProvider =
       PortfolioNotifier.new,
     );
 
+/// Synthèse du portefeuille pour la page Compte : toujours NON filtrée par
+/// SGI (contrairement à [portfolioProvider], qui suit le filtre de l'onglet).
+final accountPortfolioProvider = FutureProvider.autoDispose<PortfolioData>(
+  (ref) {
+    ref.watch(currentUserIdProvider);
+    return ref.watch(portfolioRepositoryProvider).get();
+  },
+);
+
 class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
   @override
   Future<PortfolioData> build() {
@@ -179,6 +188,7 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
   void _refresh() {
     ref.invalidateSelf();
     ref.invalidate(portfolioHistoryProvider);
+    ref.invalidate(accountPortfolioProvider);
   }
 
   Future<String?> addLot(

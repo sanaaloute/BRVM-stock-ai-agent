@@ -106,10 +106,14 @@ def verify_code(body: VerifyCodeBody, request: Request) -> dict[str, Any]:
 @router.post("/refresh")
 def refresh(body: RefreshBody) -> dict[str, Any]:
     _require_auth_enabled()
-    tokens = auth_service.refresh_tokens(body.refresh_token)
-    if tokens is None:
+    result = auth_service.refresh_tokens(body.refresh_token)
+    if result is None:
         raise HTTPException(status_code=401, detail="Session expirée. Reconnectez-vous.")
-    return {"ok": True, **tokens}
+    # Le profil accompagne les nouveaux jetons : l'app le persiste à chaque
+    # renouvellement, donc sans lui elle écraserait l'utilisateur stocké par
+    # un profil vide (id perdu → toutes les conversations sur le thread
+    # par défaut).
+    return {"ok": True, "user": _public_user(result["user"]), **result["tokens"]}
 
 
 @router.post("/logout")

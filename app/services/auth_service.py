@@ -372,7 +372,9 @@ def issue_tokens(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def refresh_tokens(refresh_token: str) -> dict[str, Any] | None:
-    """Validate a refresh token, rotate it, and return a new pair (or None)."""
+    """Validate a refresh token, rotate it, and return {"user", "tokens"}
+    (or None). The user travels with the new pair: without it the client would
+    persist a profile with an empty id and lose its conversation threading."""
     if not auth_enabled():
         return None
     token_hash = _hash(refresh_token.strip())
@@ -397,7 +399,7 @@ def refresh_tokens(refresh_token: str) -> dict[str, Any] | None:
     user = get_app_user_by_id(row.user_id)
     if user is None or not user.get("principal_id"):
         return None
-    return issue_tokens(user)
+    return {"user": user, "tokens": issue_tokens(user)}
 
 
 def revoke_refresh_token(refresh_token: str) -> None:

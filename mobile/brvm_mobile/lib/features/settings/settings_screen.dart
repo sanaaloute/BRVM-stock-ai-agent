@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/config.dart';
+import '../../core/format.dart';
+import '../../core/models/auth_user.dart';
 import '../../core/providers.dart';
 import '../../core/push_service.dart';
 import '../../core/theme_provider.dart';
 import '../../core/ui.dart';
+import '../portfolio/portfolio_models.dart';
+import '../portfolio/portfolio_providers.dart';
 import 'settings_providers.dart';
 
-/// Onglet « Moi » (Compte) : profil, apparence (thème), digest,
-/// notifications, quota, version, déconnexion et suppression du compte.
+/// Onglet « Moi » (Compte) : en-tête profil (avatar, nom, coordonnées),
+/// synthèse du portefeuille, préférences (apparence, digest, notifications),
+/// quota, version, déconnexion et suppression du compte.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -27,76 +33,24 @@ class SettingsScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: const KoraAppBar(title: Text('Compte')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: <Widget>[
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.15),
-                    child: Icon(
-                      Icons.person_outline,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          user?.displayName ?? 'Utilisateur',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        if (user?.email != null) ...<Widget>[
-                          const SizedBox(height: 2),
-                          Text(
-                            user!.email!,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color:
-                                        Theme.of(context).colorScheme.muted),
-                          ),
-                        ],
-                        if (user?.phone != null &&
-                            user?.phone != user?.displayName) ...<Widget>[
-                          const SizedBox(height: 2),
-                          Text(
-                            user!.phone!,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    color:
-                                        Theme.of(context).colorScheme.muted),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(meProvider);
+          ref.invalidate(accountPortfolioProvider);
+          ref.invalidate(quotaProvider);
+          ref.invalidate(digestProvider);
+        },
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
+          _ProfileHeaderCard(user: user),
           const SizedBox(height: 16),
-          Text('Apparence', style: Theme.of(context).textTheme.titleMedium),
+          const _PortfolioOverviewCard(),
+          const SizedBox(height: 16),
+          Text('Préférences', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           const _AppearanceCard(),
-          const SizedBox(height: 16),
-          Text('Récapitulatif (digest)',
-              style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           digest.when(
             loading: () => const Card(
@@ -148,8 +102,6 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Text('Notifications', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Card(
             child: ListTile(
@@ -231,7 +183,8 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           const _VersionTile(),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -257,6 +210,227 @@ class SettingsScreen extends ConsumerWidget {
     if (confirmed == true) {
       await ref.read(authStateProvider.notifier).signOut();
     }
+  }
+}
+
+/// En-tête profil : avatar aux initiales (dégradé émeraude/doré), nom dérivé
+/// de l'identifiant et coordonnées (e-mail, téléphone, Telegram lié).
+class _ProfileHeaderCard extends StatelessWidget {
+  const _ProfileHeaderCard({required this.user});
+
+  final AuthUser? user;
+
+  /// Nom d'affichage convivial : la partie locale de l'e-mail (« trader »
+  /// pour « trader@brvm.ci »), sinon l'identifiant tel quel.
+  static String displayLabel(AuthUser? user) {
+    if (user == null) return 'Utilisateur';
+    final email = user.email;
+    if (email != null && email.contains('@')) {
+      final local = email.split('@').first.trim();
+      if (local.isNotEmpty) {
+        return local[0].toUpperCase() + local.substring(1);
+      }
+    }
+    return user.displayName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = displayLabel(user);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: <Widget>[
+            _InitialsAvatar(label: label),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    label,
+                    style: theme.textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  if (user?.email != null)
+                    _ContactRow(icon: Icons.mail_outline, text: user!.email!),
+                  if (user?.phone != null)
+                    _ContactRow(
+                        icon: Icons.phone_outlined, text: user!.phone!),
+                  if (user?.hasTelegram ?? false)
+                    const _ContactRow(
+                        icon: Icons.send_outlined, text: 'Telegram lié'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Avatar circulaire aux initiales de l'utilisateur (dégradé du thème).
+class _InitialsAvatar extends StatelessWidget {
+  const _InitialsAvatar({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final trimmed = label.trim();
+    final initial =
+        trimmed.isEmpty ? null : trimmed.substring(0, 1).toUpperCase();
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[colors.primary, colors.secondary],
+        ),
+      ),
+      alignment: Alignment.center,
+      child: initial == null
+          ? Icon(Icons.person_outline, color: colors.onPrimary, size: 30)
+          : Text(
+              initial,
+              style: TextStyle(
+                color: colors.onPrimary,
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+    );
+  }
+}
+
+/// Ligne de contact avec petite icône (e-mail, téléphone…).
+class _ContactRow extends StatelessWidget {
+  const _ContactRow({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: <Widget>[
+          Icon(icon, size: 14, color: colors.muted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: colors.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Carte synthèse du portefeuille : valeur totale, performance, dividendes,
+/// nombre de positions, et raccourci vers l'onglet Portefeuille.
+class _PortfolioOverviewCard extends ConsumerWidget {
+  const _PortfolioOverviewCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final portfolio = ref.watch(accountPortfolioProvider);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: portfolio.when(
+          loading: () => const SizedBox(height: 96, child: LoadingView()),
+          error: (error, _) => ErrorView(
+            message: 'Portefeuille indisponible.\n$error',
+            onRetry: () => ref.invalidate(accountPortfolioProvider),
+          ),
+          data: (data) => _PortfolioOverviewBody(data: data),
+        ),
+      ),
+    );
+  }
+}
+
+class _PortfolioOverviewBody extends StatelessWidget {
+  const _PortfolioOverviewBody({required this.data});
+
+  final PortfolioData data;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final summary = data.summary;
+    final positions = summary.positionsCount ?? data.positions.length;
+    final empty = positions == 0 && (summary.totalValueFcfa ?? 0) == 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(Icons.pie_chart_outline, size: 20, color: colors.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Portefeuille', style: theme.textTheme.titleMedium),
+            ),
+            TextButton(
+              key: const Key('account-portfolio-link'),
+              onPressed: () => context.go('/portefeuille'),
+              child: const Text('Gérer'),
+            ),
+          ],
+        ),
+        if (empty) ...<Widget>[
+          const SizedBox(height: 4),
+          Text(
+            'Aucune position pour le moment.',
+            style: theme.textTheme.bodyMedium?.copyWith(color: colors.muted),
+          ),
+        ] else ...<Widget>[
+          Text(
+            'Valeur totale',
+            style: theme.textTheme.bodySmall?.copyWith(color: colors.muted),
+          ),
+          const SizedBox(height: 2),
+          PriceText(
+            summary.totalValueFcfa,
+            style: theme.textTheme.headlineMedium,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              StatChip(
+                label: 'Gain/Perte',
+                value: formatSignedFcfa(summary.totalGainLossFcfa),
+              ),
+              StatChip(
+                label: 'Dividendes',
+                value: formatFcfa(summary.dividendsFcfa),
+              ),
+              StatChip(label: 'Positions', value: '$positions'),
+            ],
+          ),
+        ],
+      ],
+    );
   }
 }
 

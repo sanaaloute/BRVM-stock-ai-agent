@@ -66,6 +66,15 @@ class AuthSession {
   final String refreshToken;
   final int refreshExpiresIn;
   final String tokenType;
+
+  AuthSession copyWith({AuthUser? user}) => AuthSession(
+        user: user ?? this.user,
+        accessToken: accessToken,
+        accessExpiresIn: accessExpiresIn,
+        refreshToken: refreshToken,
+        refreshExpiresIn: refreshExpiresIn,
+        tokenType: tokenType,
+      );
 }
 
 /// Exception métier renvoyée par [AuthRepository].

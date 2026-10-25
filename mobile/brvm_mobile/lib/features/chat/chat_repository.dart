@@ -40,6 +40,13 @@ class ChatRepository {
         .toList();
   }
 
+  /// Questions suggérées pour une conversation vierge (générées côté
+  /// serveur à partir des données de marché du jour).
+  Future<List<String>> getSuggestions() async {
+    final response = await _api.get('${AppConfig.apiPrefix}/chat/suggestions');
+    return asStringList(asMap(response.data)['suggestions']);
+  }
+
   Future<void> deleteConversation(String threadId) async {
     await _api.delete('${AppConfig.apiPrefix}/conversations/$threadId');
   }

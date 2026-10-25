@@ -107,7 +107,17 @@ class ApiClient {
       if (data is Map<String, dynamic> &&
           data['access_token'] is String &&
           data['refresh_token'] is String) {
-        await storage.saveSession(AuthSession.fromJson(data));
+        var session = AuthSession.fromJson(data);
+        if (session.user.id.isEmpty) {
+          // Réponse sans profil : ne jamais écraser l'utilisateur stocké par
+          // un profil vide — sans id, les nouvelles conversations perdraient
+          // leur préfixe app:{userId} et fusionneraient côté serveur.
+          final stored = await storage.readUser();
+          if (stored != null && stored.id.isNotEmpty) {
+            session = session.copyWith(user: stored);
+          }
+        }
+        await storage.saveSession(session);
         return true;
       }
       return false;

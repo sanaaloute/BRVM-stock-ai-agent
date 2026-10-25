@@ -420,6 +420,94 @@ def test_default_thread_listed_with_title_and_history():
     assert client.get(f"/mobile/v1/conversations/{default_thread}/messages", headers=_headers(other)).status_code == 404
 
 
+def test_refresh_returns_user_payload():
+    """The refresh response must carry the user profile: the app persists it
+    on every renewal; without it the stored profile is overwritten with an
+    empty id and every new chat lands on the single default thread."""
+    first = _auth("refresh-user@example.com")
+    r = client.post("/mobile/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["user"]["id"] == first["user"]["id"]
+    assert body["user"]["email"] == "refresh-user@example.com"
+    assert body["access_token"] and body["refresh_token"]
+
+
+def test_two_chat_threads_listed_as_two_conversations():
+    """Each distinct app thread_id is stored and listed as its own conversation
+    (regression guard for « new discussion » collapsing into one session)."""
+    tokens = _auth("two-threads@example.com")
+    h = _headers(tokens)
+    uid = tokens["user"]["id"]
+    t1 = f"app:{uid}:111-aaa"
+    t2 = f"app:{uid}:222-bbb"
+    r = client.post("/mobile/v1/chat", json={"query": "q1", "thread_id": t1}, headers=h)
+    assert r.status_code == 200 and r.json()["thread_id"] == t1
+    r = client.post("/mobile/v1/chat", json={"query": "q2", "thread_id": t2}, headers=h)
+    assert r.status_code == 200 and r.json()["thread_id"] == t2
+    ids = [c["thread_id"] for c in client.get("/mobile/v1/conversations", headers=h).json()["conversations"]]
+    assert t1 in ids, ids
+    assert t2 in ids, ids
+
+
+def _reset_suggestions_cache():
+    import app.api.mobile as mobile_mod
+
+    mobile_mod._chat_suggestions_cache["items"] = None
+
+
+def _clear_market_data():
+    from sqlalchemy import delete
+
+    from app.db import engine as db_engine
+    from app.db import migrate as db_migrate
+    from app.db import models as db_models
+
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        s.execute(delete(db_models.MarketSnapshot))
+        s.execute(delete(db_models.AiPrediction))
+
+
+def test_chat_suggestions_fallback_without_market_data(monkeypatch):
+    import app.api.mobile as mobile_mod
+    import app.services.market_data as md
+
+    monkeypatch.setattr(md, "palmares_for_api", lambda: [])
+    monkeypatch.setattr(user_db, "get_latest_predictions", lambda *a, **k: [])
+    _reset_suggestions_cache()
+    tokens = _auth("sugg-fallback@example.com")
+    r = client.get("/mobile/v1/chat/suggestions", headers=_headers(tokens))
+    assert r.status_code == 200, r.text
+    assert r.json()["suggestions"] == list(mobile_mod._DEFAULT_CHAT_SUGGESTIONS)
+
+
+def test_chat_suggestions_follow_market_data():
+    import app.services.market_data as md
+
+    _clear_market_data()
+    _reset_suggestions_cache()
+    md.save_daily_snapshot([{
+        "symbol": "NTLC", "name": "Nestlé CI", "cours_actuel": 16900, "cours_veille": 16000,
+        "variation_pct": 5.6, "volume": 100, "value_fcfa": 1690000, "capitalisation": 1,
+    }])
+    user_db.save_predictions([
+        {"symbol": "SNTS", "direction": "hausse", "confidence_pct": 88},
+    ])
+    try:
+        tokens = _auth("sugg-dynamic@example.com")
+        r = client.get("/mobile/v1/chat/suggestions", headers=_headers(tokens))
+        assert r.status_code == 200, r.text
+        items = r.json()["suggestions"]
+        assert len(items) == 3
+        assert items[0] == "Analyse-moi l'action Nestlé CI"
+        assert items[1] == "Quelles sont les prévisions pour Sonatel Sénégal ?"
+        assert items[2] == "Quel est le palmarès du jour ?"
+    finally:
+        _clear_market_data()
+        _reset_suggestions_cache()
+
+
 def test_symbol_detail_aggregates_sections():
     import app.api.mobile as mobile_mod
 
