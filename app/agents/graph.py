@@ -94,11 +94,13 @@ _WORKER_NUDGE = (
 _STYLE_SUFFIX = """
 
 **Style de réponse (toujours) :** synthèse professionnelle, style rapport
-d'investisseur — la réponse ou le chiffre clé D'ABORD, puis seulement les
-informations utiles à la décision. Pas de dump brut des données, pas de
-séparateurs « --- », pas de détails non demandés (contacts, adresses, fax,
-tableaux année par année…). Structure légère : gras et puces courtes. Maximum
-~15 lignes, sauf si l'utilisateur demande explicitement le détail complet."""
+d'investisseur — la réponse ou le chiffre clé D'ABORD, puis les informations
+utiles à la décision. Pas de dump brut des données, pas de séparateurs
+« --- », pas de détails non demandés (contacts, adresses, fax). Structure
+claire : gras et puces. Sois aussi complet que la question l'exige — une
+réponse développée (plusieurs paragraphes ou une dizaine de puces) quand le
+sujet est riche, sans plafond de longueur. Le détail exhaustif (tableaux
+année par année, listes complètes) reste réservé aux demandes explicites."""
 
 
 def _get_supervisor_system() -> str:
