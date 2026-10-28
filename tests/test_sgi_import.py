@@ -203,6 +203,22 @@ def test_sgi_specific_sale_and_dividends(temp_db, monkeypatch):
     assert history[-1]["gain_loss_fcfa"] == 120000
 
 
+def test_sgi_breakdown_includes_dividend_only_brokers(temp_db):
+    """An SGI with dividends but no current position must still appear in the
+    breakdown — otherwise the SGI chart's 'Dividendes' view shows nothing."""
+    assert user_db.portfolio_add(USER_ID, "NTLC", 50000, "2026-01-15", 10)["ok"]
+    assert user_db.portfolio_dividend_add(
+        USER_ID, "NTLC", 1000, "2026-02-15", sgi="PHOENIX CAPITAL MANAGEMENT"
+    )["ok"]
+
+    breakdown = {group["sgi"]: group for group in user_db.portfolio_sgi_breakdown(USER_ID)}
+    assert breakdown["Non affecté"]["positions_count"] == 1
+    assert breakdown["Non affecté"]["dividends_fcfa"] == 0
+    phoenix = breakdown["PHOENIX CAPITAL MANAGEMENT"]
+    assert phoenix["positions_count"] == 0
+    assert phoenix["dividends_fcfa"] == 1000
+
+
 def test_parse_and_confirm_api(temp_db, monkeypatch):
     transactions = [
         {"symbol": "NTLC", "side": "buy", "date": "2026-01-15", "quantity": 2, "price": 50000, "amount": 100000, "sgi": "PHOENIX CAPITAL MANAGEMENT"},

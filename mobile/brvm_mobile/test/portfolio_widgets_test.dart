@@ -1,6 +1,7 @@
 import 'package:brvm_mobile/core/api_client.dart';
 import 'package:brvm_mobile/core/format.dart';
 import 'package:brvm_mobile/core/token_storage.dart';
+import 'package:brvm_mobile/core/ui.dart';
 import 'package:brvm_mobile/features/market/market_models.dart';
 import 'package:brvm_mobile/features/market/market_providers.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_chart.dart';
@@ -9,15 +10,17 @@ import 'package:brvm_mobile/features/portfolio/portfolio_models.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_providers.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_screen.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_sgi_chart.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeRepository extends PortfolioRepository {
-  _FakeRepository({this._history})
+  _FakeRepository({this._history, this.positions})
     : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   final List<PortfolioHistoryPoint>? _history;
+  final List<Position>? positions;
 
   @override
   Future<PortfolioData> get({String? sgi}) async {
@@ -33,7 +36,7 @@ class _FakeRepository extends PortfolioRepository {
         positionsCount: 2,
         lotsCount: 2,
       ),
-      positions: const <Position>[
+      positions: positions ?? const <Position>[
         Position(
           symbol: 'NTLC',
           sgi: 'PHOENIX CAPITAL MANAGEMENT',
@@ -339,5 +342,175 @@ void main() {
     expect(find.text('PHOENIX CAPITAL MANAGEMENT'), findsOneWidget);
     expect(find.textContaining('1 position(s)'), findsOneWidget);
     expect(find.textContaining('5\u202f000'), findsOneWidget);
+  });
+
+  testWidgets('SGI allocation chart dividends view plots dividend shares', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PortfolioSgiChart(
+          breakdown: <SgiSummary>[
+            SgiSummary(
+              sgi: 'PHOENIX CAPITAL MANAGEMENT',
+              positionsCount: 1,
+              quantity: 12,
+              totalCostFcfa: 100000,
+              currentValueFcfa: 112000,
+              gainLossFcfa: 12000,
+              gainLossPct: 12,
+              dividendsFcfa: 5000,
+            ),
+            SgiSummary(
+              sgi: 'BSIC Capital SA',
+              positionsCount: 1,
+              quantity: 5,
+              totalCostFcfa: 60000,
+              currentValueFcfa: 70000,
+              gainLossFcfa: 10000,
+              gainLossPct: 16.67,
+              dividendsFcfa: 0,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Vue « Valeur » : deux parts, une par courtier.
+    PieChart pie = tester.widget<PieChart>(find.byType(PieChart));
+    expect(pie.data.sections, hasLength(2));
+
+    await tester.tap(find.text('Dividendes'));
+    await tester.pumpAndSettle();
+
+    // Vue « Dividendes » : seul PHOENIX verse des dividendes — la part à
+    // zéro de BSIC est exclue au lieu d'empiler une étiquette « 0 % ».
+    expect(find.text('Aucun dividende enregistré.'), findsNothing);
+    pie = tester.widget<PieChart>(find.byType(PieChart));
+    expect(pie.data.sections, hasLength(1));
+    expect(pie.data.sections.single.value, 5000);
+    expect(pie.data.sections.single.title, '100%');
+  });
+
+  testWidgets('edit lot dialog fits when the keyboard shrinks it', (
+    tester,
+  ) async {
+    // Grande surface : tout le contenu est visible sans défilement.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 3200);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetViewInsets);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          brokersProvider.overrideWith(
+            (ref) async => <BrokerEntry>[
+              BrokerEntry(
+                raw: const <String, dynamic>{},
+                name: 'PHOENIX CAPITAL MANAGEMENT',
+              ),
+            ],
+          ),
+          portfolioRepositoryProvider.overrideWithValue(
+            _FakeRepository(
+              positions: const <Position>[
+                Position(
+                  symbol: 'NTLC',
+                  sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                  quantity: 8,
+                  totalCost: 400000,
+                  currentValueFcfa: 117600,
+                  gainLossFcfa: -282400,
+                  gainLossPct: -70.6,
+                  lots: <Lot>[
+                    Lot(
+                      id: 1,
+                      symbol: 'NTLC',
+                      sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                      buyPrice: 50000,
+                      buyDate: '2026-01-15',
+                      quantity: 8,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        child: const MaterialApp(home: PortfolioScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+
+    // Déplier la position puis ouvrir le dialogue de modification du lot.
+    await tester.tap(find.byIcon(Icons.expand_more));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Modifier le lot'), findsOneWidget);
+
+    // Clavier ouvert sur un écran court : le dialogue perd la moitié de sa
+    // hauteur — le contenu doit défiler (scrollable) au lieu de déborder
+    // (« BOTTOM OVERFLOWED » sur le bouton de date).
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.viewInsets = FakeViewPadding(bottom: 320);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Enregistrer'), findsOneWidget);
+  });
+
+  testWidgets('portfolio app bar hosts the SGI filter dropdown', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          portfolioRepositoryProvider.overrideWithValue(_FakeRepository()),
+        ],
+        child: const MaterialApp(home: PortfolioScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+
+    // Le filtre SGI vit dans la barre d'action, à gauche du bouton d'import.
+    final appBar = find.byType(KoraAppBar);
+    expect(
+      find.descendant(of: appBar, matching: find.text('SGI')),
+      findsOneWidget,
+    );
+    final sgiLabelX = tester.getTopLeft(
+      find.descendant(of: appBar, matching: find.text('SGI')),
+    ).dx;
+    final importX = tester.getTopLeft(
+      find.byTooltip('Importer un document SGI'),
+    ).dx;
+    expect(sgiLabelX, lessThan(importX));
+
+    // Ouvrir le menu : tous les courtiers du portefeuille y figurent.
+    await tester.tap(find.byType(DropdownButton<String?>));
+    await tester.pumpAndSettle();
+    expect(find.text('Tous les SGI'), findsOneWidget);
+    expect(find.text('PHOENIX CAPITAL MANAGEMENT'), findsWidgets);
+    expect(find.text('BSIC Capital SA'), findsOneWidget);
+
+    // Choisir un courtier met à jour le filtre global.
+    await tester.tap(find.text('BSIC Capital SA').last);
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(PortfolioScreen)),
+    );
+    expect(container.read(portfolioSgiFilterProvider), 'BSIC Capital SA');
+    expect(tester.takeException(), isNull);
   });
 }

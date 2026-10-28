@@ -85,6 +85,7 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
       appBar: KoraAppBar(
         title: const Text('Portefeuille'),
         actions: <Widget>[
+          const _SgiFilterDropdown(),
           IconButton(
             tooltip: 'Importer un document SGI',
             onPressed: () => SgiImportDialog.show(context),
@@ -130,7 +131,7 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
                 const SizedBox(height: 16),
                 PortfolioSgiChart(breakdown: data.sgiBreakdown),
                 const SizedBox(height: 16),
-                _buildFilters(data),
+                _buildFilters(),
                 const SizedBox(height: 8),
                 Text(
                   'Positions',
@@ -159,42 +160,9 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
     );
   }
 
-  Widget _buildFilters(PortfolioData data) {
-    final selectedSgi = ref.watch(portfolioSgiFilterProvider);
-    final brokers = _sortedBrokers(
-      data.sgiBreakdown.map(
-        (summary) =>
-            BrokerEntry(raw: const <String, dynamic>{}, name: summary.sgi),
-      ),
-    );
+  Widget _buildFilters() {
     return Column(
       children: <Widget>[
-        DropdownButtonFormField<String?>(
-          initialValue: selectedSgi,
-          isExpanded: true,
-          itemHeight: 72,
-          selectedItemBuilder: (context) =>
-              _selectedBrokerItems(brokers, 'Tous les SGI'),
-          decoration: const InputDecoration(
-            labelText: 'SGI',
-            border: OutlineInputBorder(),
-          ),
-          items: <DropdownMenuItem<String?>>[
-            const DropdownMenuItem<String?>(
-              value: null,
-              child: Text('Tous les SGI'),
-            ),
-            for (final broker in brokers)
-              DropdownMenuItem<String?>(
-                value: broker.name as String,
-                child: _SgiOption(broker: broker),
-              ),
-          ],
-          onChanged: (value) {
-            ref.read(portfolioSgiFilterProvider.notifier).state = value;
-          },
-        ),
-        const SizedBox(height: 8),
         TextField(
           controller: _searchController,
           decoration: const InputDecoration(
@@ -226,6 +194,93 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Filtre SGI compact dans la barre d'action : libellé « SGI » suivi d'une
+/// liste déroulante des courtiers présents dans le portefeuille (positions
+/// ou dividendes). Sélection affichée en forme courte (« Tous » / sigle) ;
+/// le menu garde la présentation détaillée (sigle + nom complet).
+class _SgiFilterDropdown extends ConsumerWidget {
+  const _SgiFilterDropdown();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selected = ref.watch(portfolioSgiFilterProvider);
+    final breakdown = ref.watch(portfolioProvider).valueOrNull?.sgiBreakdown ??
+        const <SgiSummary>[];
+    final brokers = _sortedBrokers(
+      breakdown.map(
+        (summary) =>
+            BrokerEntry(raw: const <String, dynamic>{}, name: summary.sgi),
+      ),
+    );
+    // La valeur sélectionnée doit toujours figurer dans les items, sinon le
+    // DropdownButton jette une assertion (ex. courtier dont le dernier lot
+    // vient d'être supprimé alors que le filtre pointe dessus).
+    final missingSelected =
+        selected != null && brokers.every((broker) => broker.name != selected);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          'SGI',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: Theme.of(context).colorScheme.muted),
+        ),
+        const SizedBox(width: 4),
+        DropdownButtonHideUnderline(
+          child: DropdownButton<String?>(
+            value: selected,
+            isDense: true,
+            itemHeight: 72,
+            hint: const Text('Tous'),
+            selectedItemBuilder: (context) => <Widget>[
+              const _ShortBrokerLabel(text: 'Tous'),
+              for (final broker in brokers)
+                _ShortBrokerLabel(text: broker.sigle),
+              if (missingSelected) _ShortBrokerLabel(text: selected),
+            ],
+            items: <DropdownMenuItem<String?>>[
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Tous les SGI'),
+              ),
+              for (final broker in brokers)
+                DropdownMenuItem<String?>(
+                  value: broker.name as String,
+                  child: _SgiOption(broker: broker),
+                ),
+              if (missingSelected)
+                DropdownMenuItem<String?>(
+                  value: selected,
+                  child: Text(selected),
+                ),
+            ],
+            onChanged: (value) {
+              ref.read(portfolioSgiFilterProvider.notifier).state = value;
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Étiquette courte et bornée pour la sélection affichée dans l'AppBar.
+class _ShortBrokerLabel extends StatelessWidget {
+  const _ShortBrokerLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 96),
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }
@@ -839,6 +894,9 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Modifier le lot ${widget.lot.symbol}'),
+      // Défilement activé : quand le clavier réduit la hauteur du dialogue,
+      // le contenu (4 champs + date) défile au lieu de déborder.
+      scrollable: true,
       content: Form(
         key: _formKey,
         child: Column(
@@ -849,12 +907,20 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
                 final brokers = _sortedBrokers(
                   ref.watch(brokersProvider).valueOrNull ?? const <dynamic>[],
                 );
+                // La valeur courante doit toujours figurer dans les items,
+                // même si la liste des courtiers n'est pas encore chargée —
+                // sinon le DropdownButtonFormField lève une assertion.
+                final missingCurrent = _sgi != 'Non affecté' &&
+                    brokers.every((broker) => broker.name != _sgi);
                 return DropdownButtonFormField<String>(
                   initialValue: _sgi,
                   isExpanded: true,
                   itemHeight: 72,
-                  selectedItemBuilder: (context) =>
-                      _selectedBrokerItems(brokers, 'Non affecté'),
+                  selectedItemBuilder: (context) => <Widget>[
+                    ..._selectedBrokerItems(brokers, 'Non affecté'),
+                    if (missingCurrent)
+                      Text(_sgi, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
                   decoration: const InputDecoration(
                     labelText: 'SGI',
                     border: OutlineInputBorder(),
@@ -868,6 +934,11 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
                       DropdownMenuItem<String>(
                         value: broker.name as String,
                         child: _SgiOption(broker: broker),
+                      ),
+                    if (missingCurrent)
+                      DropdownMenuItem<String>(
+                        value: _sgi,
+                        child: Text(_sgi),
                       ),
                   ],
                   onChanged: (value) =>

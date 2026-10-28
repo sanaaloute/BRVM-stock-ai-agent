@@ -77,18 +77,21 @@ class _PortfolioSgiChartState extends State<PortfolioSgiChart> {
       );
     }
     final sections = <PieChartSectionData>[
+      // Les parts à zéro sont exclues : fl_chart empilerait leurs titres
+      // « 0 % » à l'angle 0 et, selon la version, pourrait ne rien tracer.
       for (var i = 0; i < widget.breakdown.length; i++)
-        PieChartSectionData(
-          value: _valueOf(widget.breakdown[i]),
-          title:
-              '${(_valueOf(widget.breakdown[i]) / total * 100).toStringAsFixed(0)}%',
-          color: _colors[i % _colors.length],
-          titleStyle: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
+        if (_valueOf(widget.breakdown[i]) > 0)
+          PieChartSectionData(
+            value: _valueOf(widget.breakdown[i]),
+            title:
+                '${(_valueOf(widget.breakdown[i]) / total * 100).toStringAsFixed(0)}%',
+            color: _colors[i % _colors.length],
+            titleStyle: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        ),
     ];
     return Column(
       children: <Widget>[

@@ -439,11 +439,13 @@ def portfolio_sgi_breakdown(telegram_id: int) -> list[dict[str, Any]]:
             .where(models.PortfolioDividend.telegram_id == telegram_id)
             .group_by(models.PortfolioDividend.sgi)
         ).all()
-    dividends = {row[0]: float(row[1] or 0) for row in dividend_rows}
-    groups: dict[str, dict[str, Any]] = {}
-    for row in portfolio_with_prices(telegram_id):
-        name = row.get("sgi") or "Non affecté"
-        group = groups.setdefault(name, {
+    dividends: dict[str, float] = {}
+    for row in dividend_rows:
+        name = row[0] or "Non affecté"
+        dividends[name] = dividends.get(name, 0.0) + float(row[1] or 0)
+
+    def _new_group(name: str) -> dict[str, Any]:
+        return {
             "sgi": name,
             "positions_count": 0,
             "quantity": 0.0,
@@ -451,12 +453,23 @@ def portfolio_sgi_breakdown(telegram_id: int) -> list[dict[str, Any]]:
             "current_value_fcfa": 0.0,
             "gain_loss_fcfa": 0.0,
             "dividends_fcfa": dividends.get(name, 0.0),
-        })
+        }
+
+    groups: dict[str, dict[str, Any]] = {}
+    for row in portfolio_with_prices(telegram_id):
+        name = row.get("sgi") or "Non affecté"
+        group = groups.setdefault(name, _new_group(name))
         group["positions_count"] += 1
         group["quantity"] += row["quantity"]
         group["total_cost_fcfa"] += row["total_cost"]
         group["current_value_fcfa"] += row["current_value_fcfa"] if row["current_value_fcfa"] is not None else row["total_cost"]
         group["gain_loss_fcfa"] += row["gain_loss_fcfa"] if row["gain_loss_fcfa"] is not None else 0
+    # An SGI with dividends but no current position still gets a group:
+    # otherwise its dividends vanished from the breakdown (and the
+    # "Répartition par SGI" dividend view showed nothing).
+    for name in dividends:
+        if name not in groups:
+            groups[name] = _new_group(name)
     out = []
     for group in groups.values():
         for key in ("quantity", "total_cost_fcfa", "current_value_fcfa", "gain_loss_fcfa", "dividends_fcfa"):
@@ -590,12 +603,22 @@ def portfolio_apply_import(telegram_id: int, content_hash: str, transactions: li
 
 
 def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) -> list[dict[str, Any]]:
-    """Estimate daily unrealized portfolio value and cumulative dividends, optionally by SGI."""
+    """Estimate daily unrealized portfolio value and cumulative dividends, optionally by SGI.
+
+    Buy events come from the CURRENT lot rows replayed from their buy dates:
+    the lots table is the single source of truth the user edits, so every
+    price/date/quantity edit or deletion is reflected in the curve as-is
+    (replaying the frozen import snapshots instead desynced both: quantity
+    edits were ignored, price/date edits double-counted the position). A
+    position whose symbol has no available close is valued at cost — the same
+    fallback as portfolio_summary — so missing data never shows as an
+    artificial loss.
+    """
     end = date.today()
     start = end - timedelta(days=max(7, min(days, 366)) - 1)
-    imported_events = []
+
+    # Dividends: manual entries + the ones captured in imported statements.
     dividend_events = []
-    imported_buy_signatures = set()
     with db_engine.session_scope() as s:
         imports = s.execute(
             select(models.PortfolioImport.transactions_json).where(
@@ -614,37 +637,20 @@ def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) 
         except (TypeError, json.JSONDecodeError):
             continue
         for tx in transactions:
+            if tx.get("side") != "dividend":
+                continue
             try:
                 day = date.fromisoformat(tx["date"][:10])
-                symbol = tx["symbol"]
-                side = tx["side"]
-                broker = tx.get("sgi") or "Non affecté"
-                quantity = float(tx["quantity"])
-                price = float(tx["price"])
+                amount = float(tx.get("amount") or 0)
             except (KeyError, TypeError, ValueError):
                 continue
-            if side == "dividend":
-                amount = float(tx.get("amount") or 0)
-                if amount > 0:
-                    dividend_events.append({
-                        "date": day,
-                        "symbol": symbol,
-                        "amount": amount,
-                        "sgi": broker,
-                    })
-                continue
-            event = {
-                "date": day,
-                "symbol": symbol,
-                "side": side,
-                "quantity": quantity,
-                "price": price,
-                "sgi": broker,
-            }
-            imported_events.append(event)
-            if side == "buy":
-                imported_buy_signatures.add((symbol, day.isoformat(), price, broker))
-
+            if amount > 0:
+                dividend_events.append({
+                    "date": day,
+                    "symbol": tx.get("symbol"),
+                    "amount": amount,
+                    "sgi": tx.get("sgi") or "Non affecté",
+                })
     for row in manual_dividends:
         try:
             payment_day = date.fromisoformat(row.payment_date[:10])
@@ -657,48 +663,50 @@ def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) 
             "sgi": row.sgi or "Non affecté",
         })
 
-    manual_buy_events = []
+    buy_events = []
     for lot in portfolio_list(telegram_id):
-        signature = (
-            lot["symbol"],
-            lot["buy_date"][:10],
-            float(lot["buy_price"]),
-            lot.get("sgi") or "Non affecté",
-        )
-        if signature in imported_buy_signatures:
-            continue
         try:
-            day = date.fromisoformat(lot["buy_date"][:10])
-        except ValueError:
+            day = date.fromisoformat(str(lot["buy_date"])[:10])
+            quantity = float(lot["quantity"])
+            price = float(lot["buy_price"])
+        except (KeyError, TypeError, ValueError):
             continue
-        manual_buy_events.append({
+        if quantity <= 0 or price < 0:
+            continue
+        buy_events.append({
             "date": day,
             "symbol": lot["symbol"],
-            "side": "buy",
-            "quantity": float(lot["quantity"]),
-            "price": float(lot["buy_price"]),
+            "quantity": quantity,
+            "price": price,
             "sgi": lot.get("sgi") or "Non affecté",
         })
+    buy_events.sort(key=lambda tx: tx["date"])
 
-    events = sorted(manual_buy_events + imported_events, key=lambda tx: tx["date"])
     if sgi is not None:
-        events = [tx for tx in events if tx["sgi"] == sgi]
+        buy_events = [tx for tx in buy_events if tx["sgi"] == sgi]
         dividend_events = [tx for tx in dividend_events if tx["sgi"] == sgi]
-    if not events and not dividend_events:
+    if not buy_events and not dividend_events:
         return []
-    symbols = sorted({tx["symbol"] for tx in events})
+    symbols = sorted({tx["symbol"] for tx in buy_events})
+    # Full local series up to today: rows before the window seed the price
+    # cursor, so a stale last close still values the position instead of
+    # dropping it to zero until the first in-window close.
     series = {
-        symbol: load_series(symbol, start, end, fetch_if_missing=False)
+        symbol: load_series(symbol, None, end, fetch_if_missing=False)
         for symbol in symbols
     }
-    event_dates = [tx["date"] for tx in events] + [tx["date"] for tx in dividend_events]
+    event_dates = [tx["date"] for tx in buy_events] + [tx["date"] for tx in dividend_events]
     first_day = max(start, min(event_dates))
     trading_days = sorted({
         row["date"]
         for rows in series.values()
         for row in rows
         if first_day <= row["date"] <= end
-    } | {day for day in event_dates if first_day <= day <= end})
+    } | {day for day in event_dates if first_day <= day <= end}
+        # Always plot the window bounds: a portfolio of illiquid stocks (no
+        # close inside the window) still gets a flat line instead of an
+        # empty chart.
+        | {day for day in (start, end) if first_day <= day <= end})
     if not trading_days:
         return []
 
@@ -708,46 +716,29 @@ def portfolio_history(telegram_id: int, days: int = 90, sgi: str | None = None) 
     event_index = 0
     points = []
     for day in trading_days:
-        while event_index < len(events) and events[event_index]["date"] <= day:
-            tx = events[event_index]
+        while event_index < len(buy_events) and buy_events[event_index]["date"] <= day:
+            tx = buy_events[event_index]
             event_index += 1
-            symbol = tx["symbol"]
-            broker = tx.get("sgi") or "Non affecté"
-            key = (symbol, broker)
-            if tx["side"] == "buy":
-                holdings.setdefault(key, []).append({
-                    "quantity": tx["quantity"],
-                    "buy_price": tx["price"],
-                })
-                continue
-            remaining = tx["quantity"]
-            for lot in holdings.get(key, []):
-                if remaining <= 0:
-                    break
-                if lot["quantity"] > remaining:
-                    lot["quantity"] -= remaining
-                    remaining = 0.0
-                else:
-                    remaining -= lot["quantity"]
-                    lot["quantity"] = 0.0
-            holdings[key] = [lot for lot in holdings.get(key, []) if lot["quantity"] > 1e-9]
+            holdings.setdefault((tx["symbol"], tx["sgi"]), []).append({
+                "quantity": tx["quantity"],
+                "buy_price": tx["price"],
+            })
         for symbol, rows in series.items():
             cursor = cursors[symbol]
             while cursor < len(rows) and rows[cursor]["date"] <= day:
                 prices[symbol] = rows[cursor]["price"]
                 cursor += 1
             cursors[symbol] = cursor
-        total_cost = round(sum(
-            lot["quantity"] * lot["buy_price"]
-            for lots in holdings.values()
-            for lot in lots
-        ), 2)
-        total_value = round(sum(
-            lot["quantity"] * prices[symbol]
-            for (symbol, _), lots in holdings.items()
-            for lot in lots
-            if symbol in prices
-        ), 2)
+        total_cost = 0.0
+        total_value = 0.0
+        for (symbol, _), lots in holdings.items():
+            price = prices.get(symbol)
+            for lot in lots:
+                cost = lot["quantity"] * lot["buy_price"]
+                total_cost += cost
+                total_value += lot["quantity"] * price if price is not None else cost
+        total_cost = round(total_cost, 2)
+        total_value = round(total_value, 2)
         gain_loss = round(total_value - total_cost, 2)
         gain_pct = round(gain_loss / total_cost * 100, 2) if total_cost else None
         dividends = round(sum(tx["amount"] for tx in dividend_events if tx["date"] <= day), 2)

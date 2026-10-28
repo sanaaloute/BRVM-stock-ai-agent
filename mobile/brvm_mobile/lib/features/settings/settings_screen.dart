@@ -495,6 +495,7 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
     final colors = Theme.of(context).colorScheme;
     return AlertDialog(
       title: const Text('Supprimer définitivement ?'),
+      scrollable: true,
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -511,7 +512,17 @@ class _DeleteAccountDialogState extends ConsumerState<_DeleteAccountDialog> {
               controller: _passwordController,
               obscureText: true,
               enabled: !_deleting,
+              // Ouvre le clavier dès l'affichage du dialogue : sur certains
+              // appareils le tap ne réveille pas le clavier pour un champ
+              // mot de passe dans un dialogue (clavier « sécurisé » OEM).
+              autofocus: true,
+              keyboardType: TextInputType.visiblePassword,
+              autofillHints: const <String>[AutofillHints.password],
+              textInputAction: TextInputAction.done,
               onChanged: (_) => setState(() {}),
+              onSubmitted: (_) {
+                if (_canConfirm) _delete();
+              },
               decoration: const InputDecoration(
                 labelText: 'Mot de passe',
                 hintText: 'Confirmez avec votre mot de passe',

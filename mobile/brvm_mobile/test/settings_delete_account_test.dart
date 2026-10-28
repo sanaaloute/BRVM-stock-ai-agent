@@ -148,6 +148,29 @@ void main() {
   });
 
   testWidgets(
+      'le dialogue reste utilisable quand le clavier réduit la hauteur',
+      (tester) async {
+    const user = AuthUser(
+      id: 'u1',
+      email: 'trader@brvm.ci',
+      hasTelegram: false,
+      hasPassword: true,
+    );
+    final repo = _FakeAuthRepository(user: user);
+    await pumpScreen(tester, user: user, repo: repo);
+    expect(find.byKey(const Key('delete-account-password')), findsOneWidget);
+
+    // Clavier ouvert : le dialogue perd 320 px de hauteur — le contenu doit
+    // défiler (scrollable) au lieu de déborder.
+    addTearDown(tester.view.resetViewInsets);
+    tester.view.viewInsets = FakeViewPadding(bottom: 320);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('delete-account-password')), findsOneWidget);
+    expect(find.text('Supprimer définitivement'), findsOneWidget);
+  });
+
+  testWidgets(
       'compte démo (sans mot de passe) : pas de champ, suppression directe',
       (tester) async {
     const user = AuthUser(id: 'demo', hasTelegram: false);
