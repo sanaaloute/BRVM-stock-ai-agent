@@ -97,4 +97,34 @@ void main() {
     expect(find.byKey(const Key('confirm-field')), findsOneWidget);
     expect(find.text('Créer mon compte'), findsOneWidget);
   });
+
+  testWidgets('les indicatifs sont triés par nom de pays (ordre alphabétique)',
+      (tester) async {
+    await pumpScreen(tester);
+
+    await tester.tap(find.byKey(const Key('dial-code-field')));
+    await tester.pumpAndSettle();
+
+    // Le bouton fermé rend aussi l'item sélectionné : ne garder que la
+    // dernière occurrence de chaque libellé (celle du menu, dans l'overlay).
+    final raw = tester
+        .widgetList<Text>(find.descendant(
+          of: find.byType(DropdownMenuItem<String>),
+          matching: find.byType(Text),
+        ))
+        .map((text) => text.data ?? '')
+        .toList();
+    final seen = <String>{};
+    final labels = raw.reversed.where(seen.add).toList().reversed.toList();
+    expect(labels, <String>[
+      '+229 Bénin',
+      '+226 Burkina Faso',
+      '+225 Côte d’Ivoire',
+      '+245 Guinée-Bissau',
+      '+223 Mali',
+      '+221 Sénégal',
+      '+228 Togo',
+      'Indicatif déjà inclus (+…)',
+    ]);
+  });
 }

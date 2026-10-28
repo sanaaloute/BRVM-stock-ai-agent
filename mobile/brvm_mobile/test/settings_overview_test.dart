@@ -27,9 +27,6 @@ class _FakeSettingsRepository extends SettingsRepository {
       : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   @override
-  Future<DigestSettings> getDigest() async => const DigestSettings();
-
-  @override
   Future<Quota> getQuota() async => const Quota(used: 0, limit: 10);
 }
 
@@ -95,7 +92,7 @@ Future<void> _pumpScreen(
 }
 
 void main() {
-  testWidgets('en-tête profil : initiales, nom dérivé et coordonnées',
+  testWidgets('en-tête profil : icône personne, nom dérivé et coordonnées',
       (tester) async {
     const user = AuthUser(
       id: 'u1',
@@ -107,8 +104,8 @@ void main() {
 
     // Nom dérivé de la partie locale de l'e-mail.
     expect(find.text('Trader'), findsOneWidget);
-    // Initiale dans l'avatar.
-    expect(find.text('T'), findsOneWidget);
+    // Icône personne dans la pastille profil.
+    expect(find.byIcon(Icons.person_outline), findsOneWidget);
     // Coordonnées.
     expect(find.text('trader@brvm.ci'), findsOneWidget);
     expect(find.text('+2250701020304'), findsOneWidget);

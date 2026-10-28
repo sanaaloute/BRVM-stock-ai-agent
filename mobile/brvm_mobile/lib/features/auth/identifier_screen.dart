@@ -16,16 +16,16 @@ class IdentifierScreen extends ConsumerStatefulWidget {
 }
 
 class _IdentifierScreenState extends ConsumerState<IdentifierScreen> {
-  /// Indicatifs proposés ; chaîne vide = le numéro saisi contient déjà
-  /// l'indicatif international (« + »).
+  /// Indicatifs proposés, triés par nom de pays (ordre alphabétique) ;
+  /// chaîne vide = le numéro saisi contient déjà l'indicatif international (« + »).
   static const List<(String, String)> _dialCodes = <(String, String)>[
-    ('+225', 'Côte d’Ivoire'),
-    ('+221', 'Sénégal'),
-    ('+226', 'Burkina Faso'),
-    ('+223', 'Mali'),
-    ('+228', 'Togo'),
     ('+229', 'Bénin'),
+    ('+226', 'Burkina Faso'),
+    ('+225', 'Côte d’Ivoire'),
     ('+245', 'Guinée-Bissau'),
+    ('+223', 'Mali'),
+    ('+221', 'Sénégal'),
+    ('+228', 'Togo'),
     ('', 'Indicatif déjà inclus (+…)'),
   ];
 

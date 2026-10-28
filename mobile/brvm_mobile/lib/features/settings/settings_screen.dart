@@ -7,15 +7,14 @@ import '../../core/config.dart';
 import '../../core/format.dart';
 import '../../core/models/auth_user.dart';
 import '../../core/providers.dart';
-import '../../core/push_service.dart';
 import '../../core/theme_provider.dart';
 import '../../core/ui.dart';
 import '../portfolio/portfolio_models.dart';
 import '../portfolio/portfolio_providers.dart';
 import 'settings_providers.dart';
 
-/// Onglet « Moi » (Compte) : en-tête profil (avatar, nom, coordonnées),
-/// synthèse du portefeuille, préférences (apparence, digest, notifications),
+/// Onglet « Moi » (Compte) : en-tête profil (icône personne, nom, coordonnées),
+/// synthèse du portefeuille, préférences (apparence),
 /// quota, version, déconnexion et suppression du compte.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -28,7 +27,6 @@ class SettingsScreen extends ConsumerWidget {
     // s'affiche toujours, même pendant AuthLoading ou si /me échoue).
     final me = ref.watch(meProvider).valueOrNull;
     final user = me ?? sessionUser;
-    final digest = ref.watch(digestProvider);
     final quota = ref.watch(quotaProvider);
 
     return Scaffold(
@@ -38,7 +36,6 @@ class SettingsScreen extends ConsumerWidget {
           ref.invalidate(meProvider);
           ref.invalidate(accountPortfolioProvider);
           ref.invalidate(quotaProvider);
-          ref.invalidate(digestProvider);
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -51,79 +48,6 @@ class SettingsScreen extends ConsumerWidget {
           Text('Préférences', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           const _AppearanceCard(),
-          const SizedBox(height: 8),
-          digest.when(
-            loading: () => const Card(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: LoadingView(),
-              ),
-            ),
-            error: (error, _) => Card(
-              child: ErrorView(
-                message: 'Digest indisponible.\n$error',
-                onRetry: () => ref.invalidate(digestProvider),
-              ),
-            ),
-            data: (settings) => Card(
-              child: Column(
-                children: <Widget>[
-                  SwitchListTile(
-                    title: const Text('Recevoir le digest'),
-                    subtitle: const Text(
-                        'Résumé périodique du marché par notification.'),
-                    value: settings.enabled,
-                    onChanged: (value) => ref
-                        .read(digestProvider.notifier)
-                        .save(settings.frequency, value),
-                  ),
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: <Widget>[
-                        const Expanded(child: Text('Fréquence')),
-                        SegmentedButton<String>(
-                          segments: const <ButtonSegment<String>>[
-                            ButtonSegment<String>(
-                                value: 'daily', label: Text('Quotidien')),
-                            ButtonSegment<String>(
-                                value: 'weekly', label: Text('Hebdo')),
-                          ],
-                          selected: <String>{settings.frequency},
-                          onSelectionChanged: (selection) => ref
-                              .read(digestProvider.notifier)
-                              .save(selection.first, settings.enabled),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.notifications_outlined),
-              title: const Text('Autoriser les notifications'),
-              subtitle: Text(
-                PushService.instance.isAvailable
-                    ? 'Alertes de prix et digest push.'
-                    : 'Push non configuré sur cet appareil.',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () async {
-                await PushService.instance.requestPermission();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Demande de permission envoyée.')),
-                  );
-                }
-              },
-            ),
-          ),
           const SizedBox(height: 16),
           Text('Utilisation', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
@@ -213,7 +137,7 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-/// En-tête profil : avatar aux initiales (dégradé émeraude/doré), nom dérivé
+/// En-tête profil : icône personne (dégradé émeraude/doré), nom dérivé
 /// de l'identifiant et coordonnées (e-mail, téléphone, Telegram lié).
 class _ProfileHeaderCard extends StatelessWidget {
   const _ProfileHeaderCard({required this.user});
@@ -243,7 +167,7 @@ class _ProfileHeaderCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            _InitialsAvatar(label: label),
+            const _PersonAvatar(),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -272,18 +196,13 @@ class _ProfileHeaderCard extends StatelessWidget {
   }
 }
 
-/// Avatar circulaire aux initiales de l'utilisateur (dégradé du thème).
-class _InitialsAvatar extends StatelessWidget {
-  const _InitialsAvatar({required this.label});
-
-  final String label;
+/// Pastille profil : icône personne sur dégradé du thème.
+class _PersonAvatar extends StatelessWidget {
+  const _PersonAvatar();
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final trimmed = label.trim();
-    final initial =
-        trimmed.isEmpty ? null : trimmed.substring(0, 1).toUpperCase();
     return Container(
       width: 64,
       height: 64,
@@ -296,16 +215,7 @@ class _InitialsAvatar extends StatelessWidget {
         ),
       ),
       alignment: Alignment.center,
-      child: initial == null
-          ? Icon(Icons.person_outline, color: colors.onPrimary, size: 30)
-          : Text(
-              initial,
-              style: TextStyle(
-                color: colors.onPrimary,
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+      child: Icon(Icons.person_outline, color: colors.onPrimary, size: 34),
     );
   }
 }

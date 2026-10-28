@@ -40,9 +40,6 @@ class _FakeSettingsRepository extends SettingsRepository {
       : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   @override
-  Future<DigestSettings> getDigest() async => const DigestSettings();
-
-  @override
   Future<Quota> getQuota() async => const Quota(used: 0, limit: 10);
 }
 

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -38,9 +41,18 @@ _STOP_WORDS = frozenset({
 })
 
 
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
 def _normalize(s: str) -> str:
-    """Lowercase, strip, collapse spaces for lookup."""
-    return " ".join((s or "").lower().strip().split())
+    """Lowercase, strip accents and punctuation, collapse spaces for lookup."""
+    s = unicodedata.normalize("NFKD", (s or "").lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return " ".join(_NON_ALNUM_RE.sub(" ", s).split())
+
+
+# Stop words in normalized form (accents/punctuation stripped like lookups).
+_STOP_WORDS_NORM = frozenset(_normalize(w) for w in _STOP_WORDS)
 
 
 def _cell_value(v: Any) -> str:
@@ -105,6 +117,7 @@ def _load() -> None:
         logger.warning("BRVM_Companies.xlsx: expected columns %r and %r in %s", COL_SYMBOL, COL_NAME, list(col_index))
         _loaded = True
         return
+    word_keys: dict[str, str | None] = {}  # single-word index; None once ambiguous
     for row in rows[1:]:
         if not row:
             continue
@@ -128,10 +141,25 @@ def _load() -> None:
                 _symbol_to_country[symbol] = code
         _name_to_symbol[_normalize(name_part)] = symbol
         _name_to_symbol[_normalize(symbol)] = symbol
+        # Spaceless key so "SODE CI" and "SODECI" resolve the same way.
+        compact = _normalize(name_part).replace(" ", "")
+        if compact and compact not in _name_to_symbol:
+            _name_to_symbol[compact] = symbol
         for word in (name_part or "").replace(",", " ").replace("|", " ").replace("(", " ").replace(")", " ").split():
             w = word.strip()
-            if len(w) >= 3 and w.upper() != symbol and _normalize(w) not in _STOP_WORDS:
-                _name_to_symbol[_normalize(w)] = symbol
+            if len(w) >= 3 and w.upper() != symbol:
+                nw = _normalize(w)
+                if nw in _STOP_WORDS_NORM:
+                    continue
+                # A word shared by several companies (ecobank, totalenergies...)
+                # must not resolve at all rather than guess the wrong one.
+                if nw in word_keys and word_keys[nw] != symbol:
+                    word_keys[nw] = None
+                else:
+                    word_keys.setdefault(nw, symbol)
+    for nw, symbol in word_keys.items():
+        if symbol is not None and nw not in _name_to_symbol:
+            _name_to_symbol[nw] = symbol
     _loaded = True
 
 
@@ -181,7 +209,9 @@ _ABBREVS: dict[str, str] = {
 def resolve_to_symbol(mention: str) -> str | None:
     """
     Resolve user mention (symbol or company name) to official symbol.
-    Returns symbol if found, None if unknown (caller can ask for clarification).
+    Tolerates case, accents, punctuation and spacing variants ("SODE CI" = "SODECI"),
+    partial names ("Société Générale") and small typos ("Sontel").
+    Returns None if unknown or ambiguous (caller can ask for clarification).
     """
     _load()
     mention = (mention or "").strip()
@@ -196,7 +226,65 @@ def resolve_to_symbol(mention: str) -> str | None:
     by_name = _name_to_symbol.get(norm)
     if by_name:
         return by_name
-    return None
+    if len(norm) < 4:
+        return None
+    return _fallback_resolve(norm)
+
+
+def _fallback_resolve(norm: str) -> str | None:
+    by_name = _name_to_symbol.get(norm)
+    if by_name:
+        return by_name
+    by_compact = _name_to_symbol.get(norm.replace(" ", ""))
+    if by_compact:
+        return by_compact
+    by_prefix = _prefix_resolve(norm)
+    if by_prefix:
+        return by_prefix
+    # Users often append "CI" to names registered with "Côte d'Ivoire"
+    # ("Orange CI" vs "Orange Côte d'Ivoire"): retry without that suffix.
+    if norm.endswith(" ci") and len(norm) > 7:
+        by_stripped = _fallback_resolve(norm[:-3])
+        if by_stripped:
+            return by_stripped
+    return _fuzzy_resolve(norm)
+
+
+def _prefix_resolve(norm: str) -> str | None:
+    """Match when the mention is a word-boundary prefix of exactly one company name
+    ("Société Générale" -> SGBC; "Ecobank"/"Bank of Africa" stay ambiguous -> None)."""
+    matches = {
+        symbol
+        for symbol, name in _symbol_to_name.items()
+        if _normalize(name).startswith(norm + " ")
+    }
+    return matches.pop() if len(matches) == 1 else None
+
+
+# Typo fallback: high cutoff + clear margin over the runner-up, so look-alike
+# banking symbols (BOAB/BOAC/BOAM...) are never guessed wrong.
+_FUZZY_CUTOFF = 0.86
+_FUZZY_MARGIN = 0.05
+
+
+def _fuzzy_resolve(norm: str) -> str | None:
+    compact = norm.replace(" ", "")
+    best_by_symbol: dict[str, float] = {}
+    for key, symbol in _name_to_symbol.items():
+        score = max(
+            SequenceMatcher(None, norm, key).ratio(),
+            SequenceMatcher(None, compact, key).ratio(),
+        )
+        if score > best_by_symbol.get(symbol, 0.0):
+            best_by_symbol[symbol] = score
+    if not best_by_symbol:
+        return None
+    ranked = sorted(best_by_symbol.values(), reverse=True)
+    if ranked[0] < _FUZZY_CUTOFF:
+        return None
+    if len(ranked) > 1 and ranked[0] - ranked[1] < _FUZZY_MARGIN:
+        return None
+    return max(best_by_symbol, key=lambda s: best_by_symbol[s])
 
 
 def format_list_for_prompt() -> str:
