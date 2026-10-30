@@ -561,6 +561,57 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('actions view folds companies beyond the top 8 into Autres', (
+    tester,
+  ) async {
+    // 10 sociétés : valeurs 1000, 900, …, 100 (total 5500).
+    final positions = <Position>[
+      for (var i = 1; i <= 10; i++)
+        Position(
+          symbol: 'C${i.toString().padLeft(2, '0')}',
+          sgi: 'BSIC Capital SA',
+          quantity: 1,
+          totalCost: (1100 - i * 100).toDouble(),
+          currentValueFcfa: (1100 - i * 100).toDouble(),
+        ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        // Défilement comme dans l'écran portefeuille (la carte est plus
+        // haute que le viewport de test avec 9 lignes de légende).
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: PortfolioAllocationChart(
+              data: PortfolioData(
+                summary: const PortfolioSummary(),
+                positions: positions,
+                sgiBreakdown: const <SgiSummary>[],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Actions'));
+    await tester.pumpAndSettle();
+
+    // 8 premières parts + « Autres » (200 + 100 = 300, gris fixe).
+    final pie = tester.widget<PieChart>(find.byType(PieChart));
+    expect(pie.data.sections, hasLength(9));
+    expect(pie.data.sections.last.value, 300);
+    expect(pie.data.sections.last.color, Colors.grey.shade500);
+
+    // Légende : les 8 premières sociétés, puis « Autres » avec juste le %.
+    expect(find.text('C01'), findsOneWidget);
+    expect(find.text('C08'), findsOneWidget);
+    expect(find.text('C09'), findsNothing);
+    expect(find.text('C10'), findsNothing);
+    expect(find.text('Autres'), findsOneWidget);
+    expect(find.text('5 %'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('edit lot dialog fits when the keyboard shrinks it', (
     tester,
   ) async {

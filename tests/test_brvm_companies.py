@@ -81,6 +81,17 @@ def test_nlu_parse_resolves_sode_ci():
     assert sd["entities"]["symbol"] == "SDCC", sd
 
 
+def test_sectors_have_no_accent_variants():
+    """Sector labels are canonical: no accent-drift duplicates like
+    'Energie'/'Énergie' — every company of one sector shares one label."""
+    from app.utils.brvm_companies import _normalize, get_symbol_to_sector
+
+    sectors = list(get_symbol_to_sector().values())
+    keys = {_normalize(s) for s in sectors}
+    assert len(keys) == len(set(sectors))
+    assert "Énergie" in sectors and "Energie" not in sectors
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

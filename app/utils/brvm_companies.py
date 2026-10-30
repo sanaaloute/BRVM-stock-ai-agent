@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -160,7 +161,26 @@ def _load() -> None:
     for nw, symbol in word_keys.items():
         if symbol is not None and nw not in _name_to_symbol:
             _name_to_symbol[nw] = symbol
+    _canonicalize_sectors()
     _loaded = True
+
+
+def _canonicalize_sectors() -> None:
+    """One display label per sector: the Excel file mixes accent variants
+    (« Energie » / « Énergie »). Group by normalized form (no accents) and
+    pick the accented variant, then the most frequent, so every company of a
+    sector shares the same label."""
+    variants: dict[str, Counter[str]] = {}
+    for raw in _symbol_to_sector.values():
+        variants.setdefault(_normalize(raw), Counter())[raw] += 1
+    canonical: dict[str, str] = {}
+    for key, counter in variants.items():
+        canonical[key] = sorted(
+            counter,
+            key=lambda v: (not any(ord(c) > 127 for c in v), -counter[v], v),
+        )[0]
+    for symbol, raw in _symbol_to_sector.items():
+        _symbol_to_sector[symbol] = canonical[_normalize(raw)]
 
 
 def get_valid_symbols() -> set[str]:

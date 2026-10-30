@@ -20,6 +20,7 @@ class _AllocationGroup {
     this.currentValueFcfa = 0,
     this.gainLossFcfa = 0,
     this.dividendsFcfa = 0,
+    this.isOther = false,
   });
 
   final String name;
@@ -29,6 +30,10 @@ class _AllocationGroup {
   final double currentValueFcfa;
   final double gainLossFcfa;
   final double dividendsFcfa;
+
+  /// Regroupement « Autres » (queue du classement) : légende réduite à la
+  /// part en pourcentage, couleur grise fixe.
+  final bool isOther;
 
   double? get gainLossPct =>
       totalCostFcfa > 0 ? gainLossFcfa / totalCostFcfa * 100 : null;
@@ -213,9 +218,46 @@ class _PortfolioAllocationChartState extends State<PortfolioAllocationChart> {
     return group.currentValueFcfa;
   }
 
+  /// Vue « Actions » : au-delà de 8 sociétés, top 8 + une part « Autres »
+  /// agrégeant le reste — sinon le camembert devient illisible. Le tri suit
+  /// la métrique affichée (valeur ou dividendes).
+  static const int _maxActionSlices = 8;
+
+  List<_AllocationGroup> _visibleGroups(List<_AllocationGroup> groups) {
+    if (_dimension != _AllocationDimension.actions ||
+        groups.length <= _maxActionSlices) {
+      return groups;
+    }
+    final sorted = List<_AllocationGroup>.of(groups)
+      ..sort((a, b) => _valueOf(b).compareTo(_valueOf(a)));
+    final top = sorted.take(_maxActionSlices).toList();
+    final rest = sorted.skip(_maxActionSlices).toList();
+    final otherValue = rest.fold<double>(0, (sum, g) => sum + _valueOf(g));
+    // Rien à regrouper si le reste est nul dans la métrique affichée.
+    if (otherValue <= 0) return top;
+    return <_AllocationGroup>[
+      ...top,
+      _AllocationGroup(
+        name: 'Autres',
+        isOther: true,
+        positionsCount: rest.fold<int>(0, (sum, g) => sum + g.positionsCount),
+        quantity: rest.fold<double>(0, (sum, g) => sum + g.quantity),
+        totalCostFcfa: rest.fold<double>(0, (sum, g) => sum + g.totalCostFcfa),
+        currentValueFcfa:
+            rest.fold<double>(0, (sum, g) => sum + g.currentValueFcfa),
+        gainLossFcfa: rest.fold<double>(0, (sum, g) => sum + g.gainLossFcfa),
+        dividendsFcfa: rest.fold<double>(0, (sum, g) => sum + g.dividendsFcfa),
+      ),
+    ];
+  }
+
+  Color _colorFor(int index, _AllocationGroup group) =>
+      group.isOther ? Colors.grey.shade500 : _colors[index % _colors.length];
+
   Widget _buildContent(ThemeData theme) {
-    final groups = _groups;
-    final total = groups.fold<double>(0, (sum, group) => sum + _valueOf(group));
+    final allGroups = _groups;
+    final total =
+        allGroups.fold<double>(0, (sum, group) => sum + _valueOf(group));
     if (total <= 0) {
       return Text(
         _metric == _AllocationMetric.value
@@ -224,6 +266,7 @@ class _PortfolioAllocationChartState extends State<PortfolioAllocationChart> {
         style: theme.textTheme.bodyMedium,
       );
     }
+    final groups = _visibleGroups(allGroups);
     final sections = <PieChartSectionData>[
       // Les parts à zéro sont exclues : fl_chart empilerait leurs titres
       // « 0 % » à l'angle 0 et, selon la version, pourrait ne rien tracer.
@@ -233,7 +276,7 @@ class _PortfolioAllocationChartState extends State<PortfolioAllocationChart> {
             value: _valueOf(groups[i]),
             title:
                 '${(_valueOf(groups[i]) / total * 100).toStringAsFixed(0)}%',
-            color: _colors[i % _colors.length],
+            color: _colorFor(i, groups[i]),
             titleStyle: const TextStyle(
               color: Colors.white,
               fontSize: 12,
@@ -255,11 +298,61 @@ class _PortfolioAllocationChartState extends State<PortfolioAllocationChart> {
         ),
         const SizedBox(height: 12),
         for (var i = 0; i < groups.length; i++)
-          _AllocationRow(
-            group: groups[i],
-            color: _colors[i % _colors.length],
-          ),
+          groups[i].isOther
+              ? _OtherRow(
+                  name: groups[i].name,
+                  percent: _valueOf(groups[i]) / total * 100,
+                  color: _colorFor(i, groups[i]),
+                )
+              : _AllocationRow(
+                  group: groups[i],
+                  color: _colorFor(i, groups[i]),
+                ),
       ],
+    );
+  }
+}
+
+/// Ligne « Autres » de la vue Actions : nom + part en pourcentage, sans le
+/// détail chiffré des autres lignes.
+class _OtherRow extends StatelessWidget {
+  const _OtherRow({
+    required this.name,
+    required this.percent,
+    required this.color,
+  });
+
+  final String name;
+  final double percent;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 10,
+            height: 10,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Text(
+            '${percent.toStringAsFixed(0)} %',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.muted,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
