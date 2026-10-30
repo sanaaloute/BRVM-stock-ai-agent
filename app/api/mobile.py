@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -366,6 +367,7 @@ def portfolio_get(
         "summary": user_db.portfolio_summary(pid, sgi=sgi),
         "positions": user_db.portfolio_with_prices(pid, sgi=sgi),
         "sgi_breakdown": user_db.portfolio_sgi_breakdown(pid),
+        "dividends": user_db.portfolio_dividends_list(pid, sgi=sgi),
     }
 
 
@@ -407,6 +409,32 @@ def portfolio_dividend_add(body: DividendBody, user: dict = Depends(require_app_
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+class DividendUpdateBody(BaseModel):
+    symbol: str | None = Field(default=None, min_length=1, max_length=12)
+    amount: float | None = Field(default=None, gt=0)
+    payment_date: str | None = Field(default=None, min_length=8, max_length=10)
+    sgi: str | None = None
+
+
+@router.put("/portfolio/dividends/{dividend_id}")
+def portfolio_dividend_update(dividend_id: int, body: DividendUpdateBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    result = user_db.portfolio_dividend_update(
+        _principal(user), dividend_id,
+        symbol=body.symbol, amount=body.amount, payment_date=body.payment_date, sgi=body.sgi,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error"))
+    return result
+
+
+@router.delete("/portfolio/dividends/{dividend_id}")
+def portfolio_dividend_delete(dividend_id: int, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    result = user_db.portfolio_dividend_remove(_principal(user), dividend_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error"))
     return result
 
 
@@ -556,6 +584,22 @@ def alerts_add(body: AlertBody, user: dict = Depends(require_app_user)) -> dict[
     return result
 
 
+class AlertUpdateBody(BaseModel):
+    target_price: float | None = Field(default=None, gt=0)
+    direction: str | None = Field(default=None, pattern="^(above|below)$")
+
+
+@router.put("/alerts/{alert_id}")
+def alerts_update(alert_id: int, body: AlertUpdateBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    result = user_db.target_update(
+        _principal(user), alert_id,
+        target_price=body.target_price, direction=body.direction,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error"))
+    return result
+
+
 @router.delete("/alerts/{alert_id}")
 def alerts_delete(alert_id: int, user: dict = Depends(require_app_user)) -> dict[str, Any]:
     result = user_db.target_remove_by_id(_principal(user), alert_id)
@@ -599,19 +643,109 @@ def quota_get(user: dict = Depends(require_app_user)) -> dict[str, Any]:
     return {"used": used, "limit": config.DAILY_FREE_QUOTA, "exempt": user_key(user) in config.QUOTA_EXEMPT_IDS}
 
 
+def _me_payload(fresh: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(fresh["id"]),
+        "email": fresh.get("email"),
+        "phone": fresh.get("phone"),
+        "display_name": fresh.get("display_name"),
+        "has_photo": bool(fresh.get("has_photo")),
+        "has_telegram": fresh.get("telegram_id") is not None,
+        "has_password": bool(fresh.get("has_password")),
+    }
+
+
 @router.get("/me")
 def me_get(user: dict = Depends(require_app_user)) -> dict[str, Any]:
     """Fresh profile for the account screen."""
     from app.services import auth_service
 
     fresh = auth_service.get_app_user_by_id(user["id"]) or user
-    return {
-        "id": str(fresh["id"]),
-        "email": fresh.get("email"),
-        "phone": fresh.get("phone"),
-        "has_telegram": fresh.get("telegram_id") is not None,
-        "has_password": bool(fresh.get("has_password")),
-    }
+    return _me_payload(fresh)
+
+
+class UpdateProfileBody(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    email: str | None = Field(default=None, max_length=120)
+    phone: str | None = Field(default=None, max_length=32)
+    current_password: str | None = Field(default=None, max_length=200)
+
+
+@router.put("/me")
+def me_update(body: UpdateProfileBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    """Edit name/email/phone. Accounts with a password must confirm it."""
+    kwargs: dict[str, Any] = {"current_password": body.current_password}
+    fields = body.model_fields_set
+    if "display_name" in fields:
+        kwargs["display_name"] = body.display_name
+    if "email" in fields:
+        kwargs["email"] = body.email
+    if "phone" in fields:
+        kwargs["phone"] = body.phone
+    fresh, error = auth_service.update_profile(user["id"], **kwargs)
+    if error == "wrong_password":
+        raise HTTPException(status_code=401, detail="Mot de passe incorrect.")
+    if error == "identifier_taken":
+        raise HTTPException(status_code=409, detail="Un autre compte utilise déjà cet e-mail/numéro.")
+    if error == "identifier_required":
+        raise HTTPException(status_code=400, detail="Gardez au moins un e-mail ou un numéro de téléphone.")
+    if error == "invalid_identifier":
+        raise HTTPException(status_code=400, detail="Format invalide. Utilisez un e-mail ou un numéro (+225...).")
+    if error or fresh is None:
+        raise HTTPException(status_code=400, detail=error or "update_failed")
+    return _me_payload(fresh)
+
+
+@router.post("/me/photo")
+async def me_photo_upload(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_app_user),
+) -> dict[str, Any]:
+    """Upload the profile photo (JPEG/PNG/WebP, 2 MB max)."""
+    try:
+        content = await file.read(auth_service.MAX_AVATAR_BYTES + 1)
+        error = auth_service.save_avatar(user["id"], content)
+    finally:
+        await file.close()
+    if error == "too_large":
+        raise HTTPException(status_code=413, detail="La photo dépasse la taille maximale de 2 Mo.")
+    if error:
+        raise HTTPException(status_code=400, detail="Image invalide : JPEG, PNG ou WebP uniquement.")
+    return {"ok": True, "has_photo": True}
+
+
+@router.get("/me/photo")
+def me_photo_get(user: dict = Depends(require_app_user)) -> FileResponse:
+    path = auth_service.avatar_file(user["id"])
+    if path is None:
+        raise HTTPException(status_code=404, detail="Aucune photo de profil.")
+    return FileResponse(path)
+
+
+@router.delete("/me/photo")
+def me_photo_delete(user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    auth_service.delete_avatar(user["id"])
+    return {"ok": True, "has_photo": False}
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: str | None = Field(default=None, max_length=200)
+    new_password: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/me/password")
+def me_password_change(body: ChangePasswordBody, user: dict = Depends(require_app_user)) -> dict[str, Any]:
+    error = auth_service.change_password(user["id"], body.current_password, body.new_password)
+    if error == "wrong_password":
+        raise HTTPException(status_code=401, detail="Mot de passe actuel incorrect.")
+    if error == "weak_password":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mot de passe trop court ({auth_service.PASSWORD_MIN_LENGTH} caractères minimum).",
+        )
+    if error:
+        raise HTTPException(status_code=404, detail=error)
+    return {"ok": True}
 
 
 class DeleteAccountBody(BaseModel):

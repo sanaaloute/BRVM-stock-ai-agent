@@ -124,6 +124,33 @@ class PortfolioRepository {
     }
   }
 
+  /// Modifie un dividende existant. Retourne `null` si OK, sinon le message
+  /// d'erreur (404 si le dividende n'appartient pas à l'utilisateur).
+  Future<String?> updateDividend(
+    int dividendId, {
+    double? amount,
+    String? paymentDate,
+    String? sgi,
+  }) async {
+    try {
+      await _api.put(
+        '${AppConfig.apiPrefix}/portfolio/dividends/$dividendId',
+        data: <String, dynamic>{
+          'amount': ?amount,
+          'payment_date': ?paymentDate,
+          if (sgi != null) ...{'sgi': sgi},
+        },
+      );
+      return null;
+    } on DioException catch (e) {
+      return dioDetailMessage(e) ?? 'Impossible de modifier ce dividende.';
+    }
+  }
+
+  Future<void> deleteDividend(int dividendId) async {
+    await _api.delete('${AppConfig.apiPrefix}/portfolio/dividends/$dividendId');
+  }
+
   /// Modifie un lot existant. Retourne `null` si OK, sinon le message
   /// d'erreur (404 si le lot n'appartient pas à l'utilisateur).
   Future<String?> updateLot(
@@ -216,6 +243,32 @@ class PortfolioNotifier extends AsyncNotifier<PortfolioData> {
         .addDividend(symbol, amount, paymentDate, sgi: sgi);
     _refresh();
     return message;
+  }
+
+  Future<String?> updateDividend(
+    int dividendId, {
+    double? amount,
+    String? paymentDate,
+    String? sgi,
+  }) async {
+    final message = await ref
+        .read(portfolioRepositoryProvider)
+        .updateDividend(
+          dividendId,
+          amount: amount,
+          paymentDate: paymentDate,
+          sgi: sgi,
+        );
+    _refresh();
+    return message;
+  }
+
+  Future<void> deleteDividend(int dividendId) async {
+    try {
+      await ref.read(portfolioRepositoryProvider).deleteDividend(dividendId);
+    } finally {
+      _refresh();
+    }
   }
 
   Future<String?> updateLot(

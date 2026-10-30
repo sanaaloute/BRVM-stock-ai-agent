@@ -7,11 +7,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 class _FakeAlertsNotifier extends AlertsNotifier {
+  _FakeAlertsNotifier([List<PriceAlert>? initial])
+    : items = initial ?? <PriceAlert>[];
+
+  List<PriceAlert> items;
   String? createdSymbol;
   double? createdTarget;
+  String? updatedId;
+  double? updatedTarget;
+  String? updatedDirection;
 
   @override
-  Future<List<PriceAlert>> build() async => <PriceAlert>[];
+  Future<List<PriceAlert>> build() async => items;
 
   @override
   Future<String?> create(
@@ -22,6 +29,38 @@ class _FakeAlertsNotifier extends AlertsNotifier {
     createdSymbol = symbol;
     createdTarget = targetPrice;
     return null;
+  }
+
+  @override
+  Future<String?> updateAlert(
+    String id, {
+    double? targetPrice,
+    String? direction,
+  }) async {
+    updatedId = id;
+    updatedTarget = targetPrice;
+    updatedDirection = direction;
+    items = <PriceAlert>[
+      for (final alert in items)
+        if (alert.id == id)
+          PriceAlert(
+            id: alert.id,
+            symbol: alert.symbol,
+            targetPrice: targetPrice ?? alert.targetPrice,
+            direction: direction ?? alert.direction,
+            notified: alert.notified,
+          )
+        else
+          alert,
+    ];
+    ref.invalidateSelf();
+    return null;
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    items = items.where((alert) => alert.id != id).toList();
+    ref.invalidateSelf();
   }
 }
 
@@ -118,5 +157,80 @@ void main() {
     await tester.tap(find.widgetWithText(TextButton, 'Annuler'));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
+  });
+
+  testWidgets('chaque alerte a des boutons modifier/supprimer ; suppression confirmée',
+      (tester) async {
+    final notifier = _FakeAlertsNotifier(const <PriceAlert>[
+      PriceAlert(
+        id: '1',
+        symbol: 'SONATEL',
+        targetPrice: 6200,
+        direction: 'above',
+      ),
+      PriceAlert(
+        id: '2',
+        symbol: 'NTLC',
+        targetPrice: 14000,
+        direction: 'below',
+        notified: true,
+      ),
+    ]);
+    await tester.pumpWidget(_app(notifier));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Modifier l’alerte'), findsNWidgets(2));
+    expect(find.byTooltip('Supprimer l’alerte'), findsNWidgets(2));
+    expect(find.text('Déclenchée'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Supprimer l’alerte').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Supprimer cette alerte ?'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Supprimer'));
+    await tester.pumpAndSettle();
+    expect(find.text('SONATEL'), findsNothing);
+    expect(find.text('NTLC'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('modifier une alerte : dialogue pré-rempli, update appelé',
+      (tester) async {
+    final notifier = _FakeAlertsNotifier(const <PriceAlert>[
+      PriceAlert(
+        id: '1',
+        symbol: 'SONATEL',
+        targetPrice: 6200,
+        direction: 'above',
+      ),
+    ]);
+    await tester.pumpWidget(_app(notifier));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Modifier l’alerte'));
+    await tester.pumpAndSettle();
+
+    // Mode édition : symbole fixe, cours cible pré-rempli, bouton dédié.
+    expect(find.text('Modifier l’alerte'), findsOneWidget);
+    expect(find.byType(DropdownMenu<String>), findsNothing);
+    final priceField = tester.widget<TextFormField>(
+      find.byKey(const Key('alert-price-field')),
+    );
+    expect(priceField.controller!.text, '6200.0');
+
+    await tester.enterText(
+      find.byKey(const Key('alert-price-field')),
+      '5000',
+    );
+    await tester.tap(find.text('En dessous'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+    await tester.pumpAndSettle();
+
+    expect(notifier.updatedId, '1');
+    expect(notifier.updatedTarget, 5000.0);
+    expect(notifier.updatedDirection, 'below');
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }

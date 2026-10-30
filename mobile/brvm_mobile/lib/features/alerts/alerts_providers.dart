@@ -66,6 +66,27 @@ class AlertsRepository {
     }
   }
 
+  /// Modifie une alerte existante. Retourne `null` si OK, sinon le message
+  /// d'erreur (404 si l'alerte n'appartient pas à l'utilisateur).
+  Future<String?> updateAlert(
+    String id, {
+    double? targetPrice,
+    String? direction,
+  }) async {
+    try {
+      await _api.put(
+        '${AppConfig.apiPrefix}/alerts/$id',
+        data: <String, dynamic>{
+          'target_price': ?targetPrice,
+          'direction': ?direction,
+        },
+      );
+      return null;
+    } on DioException catch (e) {
+      return dioDetailMessage(e) ?? 'Impossible de modifier l’alerte.';
+    }
+  }
+
   Future<void> delete(String id) async {
     await _api.delete('${AppConfig.apiPrefix}/alerts/$id');
   }
@@ -91,6 +112,18 @@ class AlertsNotifier extends AsyncNotifier<List<PriceAlert>> {
     final message = await ref
         .read(alertsRepositoryProvider)
         .create(symbol, targetPrice, direction);
+    ref.invalidateSelf();
+    return message;
+  }
+
+  Future<String?> updateAlert(
+    String id, {
+    double? targetPrice,
+    String? direction,
+  }) async {
+    final message = await ref
+        .read(alertsRepositoryProvider)
+        .updateAlert(id, targetPrice: targetPrice, direction: direction);
     ref.invalidateSelf();
     return message;
   }

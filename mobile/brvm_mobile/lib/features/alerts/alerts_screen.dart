@@ -69,22 +69,45 @@ class AlertsScreen extends ConsumerWidget {
                     subtitle: Text(
                       alert.isAbove ? 'Au-dessus de' : 'En dessous de',
                     ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Text(
-                          formatFcfa(alert.targetPrice),
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: <Widget>[
+                            Text(
+                              formatFcfa(alert.targetPrice),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            if (alert.notified)
+                              Text(
+                                'Déclenchée',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.green.shade700),
+                              ),
+                          ],
                         ),
-                        if (alert.notified)
-                          Text(
-                            'Déclenchée',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: Colors.green.shade700),
+                        IconButton(
+                          tooltip: 'Modifier l’alerte',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () => _editAlert(context, alert),
+                        ),
+                        IconButton(
+                          tooltip: 'Supprimer l’alerte',
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.error,
                           ),
+                          onPressed: () =>
+                              _deleteAlert(context, ref, alert.id),
+                        ),
                       ],
                     ),
                   ),
@@ -98,12 +121,29 @@ class AlertsScreen extends ConsumerWidget {
         heroTag: 'alerts-fab',
         onPressed: () => showDialog<void>(
           context: context,
-          builder: (context) => const _CreateAlertDialog(),
+          builder: (context) => const _AlertFormDialog(),
         ),
         icon: const Icon(Icons.add_alert),
         label: const Text('Nouvelle alerte'),
       ),
     );
+  }
+
+  void _editAlert(BuildContext context, PriceAlert alert) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _AlertFormDialog(alert: alert),
+    );
+  }
+
+  Future<void> _deleteAlert(
+    BuildContext context,
+    WidgetRef ref,
+    String alertId,
+  ) async {
+    if (await _confirmDelete(context, ref, alertId)) {
+      await ref.read(alertsProvider.notifier).delete(alertId);
+    }
   }
 
   Future<bool> _confirmDelete(
@@ -131,18 +171,21 @@ class AlertsScreen extends ConsumerWidget {
   }
 }
 
-/// Dialogue de création d'alerte : contrôleurs possédés par l'état
-/// (créés dans initState, disposés dans dispose) — aucun StatefulBuilder,
-/// donc aucun écouteur ni texte réinjecté à chaque rebuild.
-class _CreateAlertDialog extends ConsumerStatefulWidget {
-  const _CreateAlertDialog();
+/// Dialogue de création/modification d'alerte : contrôleurs possédés par
+/// l'état (créés dans initState, disposés dans dispose) — aucun
+/// StatefulBuilder, donc aucun écouteur ni texte réinjecté à chaque rebuild.
+/// Avec [alert] non nul, le dialogue passe en mode édition : symbole fixe,
+/// cours cible et direction pré-remplis.
+class _AlertFormDialog extends ConsumerStatefulWidget {
+  const _AlertFormDialog({this.alert});
+
+  final PriceAlert? alert;
 
   @override
-  ConsumerState<_CreateAlertDialog> createState() =>
-      _CreateAlertDialogState();
+  ConsumerState<_AlertFormDialog> createState() => _AlertFormDialogState();
 }
 
-class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
+class _AlertFormDialogState extends ConsumerState<_AlertFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _symbolController;
   late final TextEditingController _priceController;
@@ -151,11 +194,18 @@ class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
   String? _error;
   bool _saving = false;
 
+  PriceAlert? get _alert => widget.alert;
+  bool get _isEdit => _alert != null;
+
   @override
   void initState() {
     super.initState();
     _symbolController = TextEditingController();
-    _priceController = TextEditingController();
+    _priceController = TextEditingController(
+      text: _alert?.targetPrice?.toString() ?? '',
+    );
+    _direction = _alert?.direction ?? 'above';
+    _symbol = _alert?.symbol;
   }
 
   @override
@@ -167,9 +217,11 @@ class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
 
   static final _symbolPattern = RegExp(r'^[A-Za-z0-9&.\- ]{1,15}$');
 
-  Future<void> _create() async {
+  Future<void> _save() async {
     if (_saving) return;
-    final symbol = _symbolController.text.trim().toUpperCase();
+    final alert = _alert;
+    final symbol =
+        _isEdit ? alert!.symbol : _symbolController.text.trim().toUpperCase();
     if (symbol.isEmpty || !_symbolPattern.hasMatch(symbol)) {
       setState(() => _error = 'Saisissez un symbole valide.');
       return;
@@ -181,9 +233,14 @@ class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
     });
     final target =
         double.parse(_priceController.text.replaceAll(',', '.'));
-    final message = await ref
-        .read(alertsProvider.notifier)
-        .create(symbol, target, _direction);
+    final notifier = ref.read(alertsProvider.notifier);
+    final message = _isEdit
+        ? await notifier.updateAlert(
+            alert!.id,
+            targetPrice: target,
+            direction: _direction,
+          )
+        : await notifier.create(symbol, target, _direction);
     if (!mounted) return;
     if (message == null) {
       Navigator.of(context).pop();
@@ -205,13 +262,27 @@ class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
         : null;
 
     return AlertDialog(
-      title: const Text('Nouvelle alerte'),
+      title: Text(_isEdit ? 'Modifier l’alerte' : 'Nouvelle alerte'),
       content: Form(
         key: _formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (symbols.isEmpty)
+            if (_isEdit)
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Symbole',
+                  border: OutlineInputBorder(),
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _alert!.symbol,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              )
+            else if (symbols.isEmpty)
               TextFormField(
                 controller: _symbolController,
                 textCapitalization: TextCapitalization.characters,
@@ -292,14 +363,14 @@ class _CreateAlertDialogState extends ConsumerState<_CreateAlertDialog> {
           child: const Text('Annuler'),
         ),
         FilledButton(
-          onPressed: _saving ? null : _create,
+          onPressed: _saving ? null : _save,
           child: _saving
               ? const SizedBox(
                   height: 20,
                   width: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Créer'),
+              : Text(_isEdit ? 'Enregistrer' : 'Créer'),
         ),
       ],
     );

@@ -312,6 +312,128 @@ def test_alerts_round_trip_delete_by_id():
     assert client.get("/mobile/v1/alerts", headers=h).json()["alerts"] == []
 
 
+def test_alerts_update_by_id():
+    tokens = _auth("alerts-update@example.com")
+    h = _headers(tokens)
+    r = client.post("/mobile/v1/alerts", json={
+        "symbol": "NTLC", "target_price": 15000.0, "direction": "above",
+    }, headers=h)
+    assert r.status_code == 200, r.text
+    alert_id = client.get("/mobile/v1/alerts", headers=h).json()["alerts"][0]["id"]
+
+    # Edit target price + direction; the alert is re-armed (notified=False).
+    r = client.put(
+        f"/mobile/v1/alerts/{alert_id}",
+        json={"target_price": 14000.0, "direction": "below"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    alert = client.get("/mobile/v1/alerts", headers=h).json()["alerts"][0]
+    assert alert["target_price"] == 14000.0
+    assert alert["direction"] == "below"
+    assert not alert["notified"]
+
+    # Validation and ownership.
+    assert client.put(
+        f"/mobile/v1/alerts/{alert_id}", json={"target_price": -1}, headers=h,
+    ).status_code == 422
+    other = _auth("alerts-update-other@example.com")
+    assert client.put(
+        f"/mobile/v1/alerts/{alert_id}", json={"target_price": 1}, headers=_headers(other),
+    ).status_code == 404
+
+
+def test_profile_update_photo_and_password(tmp_path, monkeypatch):
+    from app.services import auth_service
+
+    monkeypatch.setattr(auth_service, "AVATAR_DIR", tmp_path / "avatars")
+    tokens = _auth("profile@example.com")  # no password yet (OTP flow)
+    h = _headers(tokens)
+
+    # Name set without password (passwordless account) → OK.
+    r = client.put("/mobile/v1/me", json={"display_name": "Awa Koné"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["display_name"] == "Awa Koné"
+    assert r.json()["has_photo"] is False
+
+    # Give the account a password, then profile edits require it.
+    r = client.post("/mobile/v1/me/password", json={"new_password": "secret1"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert client.put("/mobile/v1/me", json={"display_name": "X"}, headers=h).status_code == 401
+    assert client.put(
+        "/mobile/v1/me",
+        json={"display_name": "X", "current_password": "wrong"},
+        headers=h,
+    ).status_code == 401
+    r = client.put(
+        "/mobile/v1/me",
+        json={"display_name": "Awa K.", "current_password": "secret1"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["display_name"] == "Awa K."
+
+    # Email/phone validation and uniqueness.
+    other = _auth("taken@example.com")
+    assert client.put(
+        "/mobile/v1/me",
+        json={"email": "taken@example.com", "current_password": "secret1"},
+        headers=h,
+    ).status_code == 409
+    assert client.put(
+        "/mobile/v1/me",
+        json={"email": "pas-un-email", "current_password": "secret1"},
+        headers=h,
+    ).status_code == 400
+    assert client.put(
+        "/mobile/v1/me",
+        json={"email": "", "phone": "", "current_password": "secret1"},
+        headers=h,
+    ).status_code == 400  # identifier_required
+
+    # Photo upload (magic bytes sniffed) → served back → deleted.
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    r = client.post(
+        "/mobile/v1/me/photo",
+        files={"file": ("avatar.png", png, "image/png")},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    r = client.get("/mobile/v1/me/photo", headers=h)
+    assert r.status_code == 200 and r.content == png
+    assert client.get("/mobile/v1/me", headers=h).json()["has_photo"] is True
+    assert client.post(
+        "/mobile/v1/me/photo",
+        files={"file": ("a.gif", b"GIF89a" + b"\x00" * 32, "image/gif")},
+        headers=h,
+    ).status_code == 400
+    assert client.delete("/mobile/v1/me/photo", headers=h).status_code == 200
+    assert client.get("/mobile/v1/me/photo", headers=h).status_code == 404
+
+    # Password change: wrong current → 401, weak → 400, then login works.
+    assert client.post(
+        "/mobile/v1/me/password",
+        json={"current_password": "nope", "new_password": "secret2"},
+        headers=h,
+    ).status_code == 401
+    assert client.post(
+        "/mobile/v1/me/password",
+        json={"current_password": "secret1", "new_password": "x"},
+        headers=h,
+    ).status_code == 400
+    assert client.post(
+        "/mobile/v1/me/password",
+        json={"current_password": "secret1", "new_password": "secret2"},
+        headers=h,
+    ).status_code == 200
+    r = client.post(
+        "/mobile/v1/auth/login",
+        json={"identifier": "profile@example.com", "password": "secret2"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["display_name"] == "Awa K."
+
+
 def test_digest_subscription():
     tokens = _auth("digest@example.com")
     h = _headers(tokens)

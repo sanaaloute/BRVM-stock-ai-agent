@@ -22,7 +22,7 @@ from app.db import engine as db_engine
 from app.db import migrate as db_migrate
 from app.db import models
 from app.utils._data import fetch_palmares, load_price_on_or_before, load_series
-from app.utils.brvm_companies import get_valid_symbols
+from app.utils.brvm_companies import get_symbol_to_sector, get_valid_symbols
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "brvm_bot.db"
 
@@ -322,6 +322,7 @@ def portfolio_with_prices(telegram_id: int, sgi: str | None = None) -> list[dict
     positions = portfolio_positions(telegram_id)
     if sgi is not None:
         positions = [pos for pos in positions if (pos.get("sgi") or "Non affecté") == sgi]
+    sectors = get_symbol_to_sector()
     rows = []
     for pos in positions:
         sym = pos["symbol"]
@@ -335,6 +336,7 @@ def portfolio_with_prices(telegram_id: int, sgi: str | None = None) -> list[dict
         rows.append({
             "symbol": sym,
             "sgi": pos.get("sgi") or "Non affecté",
+            "sector": sectors.get(sym, ""),
             "quantity": pos["quantity"],
             "avg_buy_price": avg,
             "buy_price": avg,  # back-compat: weighted average price
@@ -394,6 +396,86 @@ def portfolio_dividends_total(telegram_id: int, sgi: str | None = None) -> float
     with db_engine.session_scope() as s:
         value = s.execute(stmt).scalar_one()
     return round(float(value or 0), 2)
+
+
+def portfolio_dividends_list(telegram_id: int, sgi: str | None = None) -> list[dict[str, Any]]:
+    """All recorded dividend payments (newest first), optionally by SGI."""
+    _ensure_ready()
+    stmt = select(
+        models.PortfolioDividend.id,
+        models.PortfolioDividend.symbol,
+        models.PortfolioDividend.sgi,
+        models.PortfolioDividend.amount,
+        models.PortfolioDividend.payment_date,
+    ).where(models.PortfolioDividend.telegram_id == telegram_id)
+    if sgi is not None:
+        stmt = stmt.where(models.PortfolioDividend.sgi == sgi)
+    stmt = stmt.order_by(
+        models.PortfolioDividend.payment_date.desc(),
+        models.PortfolioDividend.id.desc(),
+    )
+    with db_engine.session_scope() as s:
+        rows = s.execute(stmt).mappings().all()
+    sectors = get_symbol_to_sector()
+    return [
+        {
+            "id": row["id"],
+            "symbol": row["symbol"],
+            "sgi": row["sgi"] or "Non affecté",
+            "amount": float(row["amount"]),
+            "payment_date": row["payment_date"],
+            "sector": sectors.get((row["symbol"] or "").strip().upper(), ""),
+        }
+        for row in rows
+    ]
+
+
+def portfolio_dividend_update(telegram_id: int, dividend_id: int, *, symbol: str | None = None, amount: float | None = None, payment_date: str | None = None, sgi: str | None = None) -> dict[str, Any]:
+    """Edit one dividend payment (mobile API)."""
+    _ensure_ready()
+    values: dict[str, Any] = {}
+    if symbol is not None:
+        sym = symbol.strip().upper()
+        if sym not in get_valid_symbols():
+            return {"ok": False, "error": f"{sym} n'est pas un symbole BRVM coté."}
+        values["symbol"] = sym
+    if sgi is not None:
+        values["sgi"] = sgi.strip() or "Non affecté"
+    if amount is not None:
+        if amount <= 0:
+            return {"ok": False, "error": "Le montant du dividende doit être positif."}
+        values["amount"] = float(amount)
+    if payment_date is not None:
+        try:
+            values["payment_date"] = date.fromisoformat(payment_date.strip()[:10]).isoformat()
+        except ValueError:
+            return {"ok": False, "error": "Date de paiement invalide. Utilisez AAAA-MM-JJ."}
+    if not values:
+        return {"ok": False, "error": "Rien à modifier."}
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            update(models.PortfolioDividend)
+            .where(models.PortfolioDividend.id == dividend_id, models.PortfolioDividend.telegram_id == telegram_id)
+            .values(**values)
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Dividende mis à jour."}
+        return {"ok": False, "error": "Dividende introuvable."}
+
+
+def portfolio_dividend_remove(telegram_id: int, dividend_id: int) -> dict[str, Any]:
+    """Delete one dividend payment (mobile API)."""
+    _ensure_ready()
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            delete(models.PortfolioDividend).where(
+                models.PortfolioDividend.id == dividend_id,
+                models.PortfolioDividend.telegram_id == telegram_id,
+            )
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Dividende supprimé."}
+        return {"ok": False, "error": "Dividende introuvable."}
 
 
 def portfolio_summary(telegram_id: int, sgi: str | None = None) -> dict[str, Any]:
@@ -868,6 +950,37 @@ def target_remove_by_id(telegram_id: int, alert_id: int) -> dict[str, Any]:
         )
         if res.rowcount:
             return {"ok": True, "message": "Alerte supprimée."}
+        return {"ok": False, "error": "Alerte introuvable."}
+
+
+def target_update(telegram_id: int, alert_id: int, *, target_price: float | None = None, direction: str | None = None) -> dict[str, Any]:
+    """Edit one alert's target price/direction (mobile API).
+
+    Any change re-arms the alert (notified back to False): the new condition
+    has not been evaluated yet.
+    """
+    _ensure_ready()
+    values: dict[str, Any] = {}
+    if target_price is not None:
+        if target_price <= 0:
+            return {"ok": False, "error": "Le prix cible doit être positif."}
+        values["target_price"] = target_price
+    if direction is not None:
+        direction = direction.strip().lower()
+        if direction not in ("above", "below"):
+            return {"ok": False, "error": "Direction invalide (above/below)."}
+        values["direction"] = direction
+    if not values:
+        return {"ok": False, "error": "Rien à modifier."}
+    values["notified"] = False
+    with db_engine.session_scope() as s:
+        res = s.execute(
+            update(models.TargetAlert)
+            .where(models.TargetAlert.id == alert_id, models.TargetAlert.telegram_id == telegram_id)
+            .values(**values)
+        )
+        if res.rowcount:
+            return {"ok": True, "message": "Alerte mise à jour."}
         return {"ok": False, "error": "Alerte introuvable."}
 
 

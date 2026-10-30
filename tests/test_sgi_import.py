@@ -301,3 +301,58 @@ def test_manual_dividend_api_summary_and_history(temp_db, monkeypatch):
     history = user_db.portfolio_history(USER_ID, 90)
     assert history[-1]["dividends_fcfa"] == 1000
     assert history[-1]["total_value_fcfa"] == 600000
+
+
+def test_manual_dividend_update_delete(temp_db):
+    """Dividends are listed in the portfolio payload and can be edited/deleted."""
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_app_user] = lambda: {"id": "user", "principal_id": USER_ID}
+    client = TestClient(app)
+
+    response = client.post(
+        "/mobile/v1/portfolio/dividends",
+        json={
+            "symbol": "NTLC",
+            "amount": 1000,
+            "payment_date": "2026-01-20",
+            "sgi": "PHOENIX CAPITAL MANAGEMENT",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    body = client.get("/mobile/v1/portfolio").json()
+    assert len(body["dividends"]) == 1
+    dividend = body["dividends"][0]
+    assert dividend["symbol"] == "NTLC"
+    assert dividend["amount"] == 1000
+    assert dividend["sgi"] == "PHOENIX CAPITAL MANAGEMENT"
+    assert "sector" in dividend
+    dividend_id = dividend["id"]
+
+    response = client.put(
+        f"/mobile/v1/portfolio/dividends/{dividend_id}",
+        json={"amount": 2500, "payment_date": "2026-02-01", "sgi": "BSIC Capital SA"},
+    )
+    assert response.status_code == 200, response.text
+    dividend = client.get("/mobile/v1/portfolio").json()["dividends"][0]
+    assert dividend["amount"] == 2500
+    assert dividend["payment_date"] == "2026-02-01"
+    assert dividend["sgi"] == "BSIC Capital SA"
+    assert user_db.portfolio_dividends_total(USER_ID) == 2500
+
+    # The SGI filter applies to the dividends list too.
+    assert client.get("/mobile/v1/portfolio", params={"sgi": "PHOENIX CAPITAL MANAGEMENT"}).json()["dividends"] == []
+    assert len(client.get("/mobile/v1/portfolio", params={"sgi": "BSIC Capital SA"}).json()["dividends"]) == 1
+
+    # Another user cannot edit or delete it.
+    app.dependency_overrides[require_app_user] = lambda: {"id": "other", "principal_id": OTHER_USER_ID}
+    assert client.put(
+        f"/mobile/v1/portfolio/dividends/{dividend_id}", json={"amount": 1}
+    ).status_code == 404
+    assert client.delete(f"/mobile/v1/portfolio/dividends/{dividend_id}").status_code == 404
+
+    app.dependency_overrides[require_app_user] = lambda: {"id": "user", "principal_id": USER_ID}
+    assert client.delete(f"/mobile/v1/portfolio/dividends/{dividend_id}").status_code == 200
+    assert client.get("/mobile/v1/portfolio").json()["dividends"] == []
+    assert user_db.portfolio_dividends_total(USER_ID) == 0

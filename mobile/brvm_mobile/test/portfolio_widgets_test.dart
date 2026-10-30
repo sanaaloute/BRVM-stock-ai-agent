@@ -4,42 +4,64 @@ import 'package:brvm_mobile/core/token_storage.dart';
 import 'package:brvm_mobile/core/ui.dart';
 import 'package:brvm_mobile/features/market/market_models.dart';
 import 'package:brvm_mobile/features/market/market_providers.dart';
+import 'package:brvm_mobile/features/portfolio/portfolio_allocation_chart.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_chart.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_import_dialog.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_models.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_providers.dart';
 import 'package:brvm_mobile/features/portfolio/portfolio_screen.dart';
-import 'package:brvm_mobile/features/portfolio/portfolio_sgi_chart.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeRepository extends PortfolioRepository {
-  _FakeRepository({this._history, this.positions})
-    : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
+  _FakeRepository({this._history, this.positions, List<DividendEntry>? dividends})
+    : dividends =
+          dividends ??
+          <DividendEntry>[
+            const DividendEntry(
+              id: 1,
+              symbol: 'NTLC',
+              sgi: 'PHOENIX CAPITAL MANAGEMENT',
+              sector: 'Agroalimentaire',
+              amount: 1000,
+              paymentDate: '2026-01-20',
+            ),
+            const DividendEntry(
+              id: 2,
+              symbol: 'SNTS',
+              sgi: 'BSIC Capital SA',
+              sector: 'Télécommunications',
+              amount: 500,
+              paymentDate: '2026-02-10',
+            ),
+          ],
+      super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
   final List<PortfolioHistoryPoint>? _history;
   final List<Position>? positions;
+  List<DividendEntry> dividends;
 
   @override
   Future<PortfolioData> get({String? sgi}) async {
     return PortfolioData(
       summary: const PortfolioSummary(
-        totalCostFcfa: 660000,
-        totalValueFcfa: 191100,
-        gainLossFcfa: -468900,
-        gainLossPct: -71.05,
-        dividendsFcfa: 1000,
-        totalGainLossFcfa: -467900,
-        totalGainLossPct: -70.89,
-        positionsCount: 2,
+        totalCostFcfa: 760000,
+        totalValueFcfa: 311100,
+        gainLossFcfa: -448900,
+        gainLossPct: -59.07,
+        dividendsFcfa: 1500,
+        totalGainLossFcfa: -447400,
+        totalGainLossPct: -58.87,
+        positionsCount: 3,
         lotsCount: 2,
       ),
       positions: positions ?? const <Position>[
         Position(
           symbol: 'NTLC',
           sgi: 'PHOENIX CAPITAL MANAGEMENT',
+          sector: 'Agroalimentaire',
           quantity: 8,
           totalCost: 400000,
           currentValueFcfa: 117600,
@@ -49,11 +71,22 @@ class _FakeRepository extends PortfolioRepository {
         Position(
           symbol: 'NTLC',
           sgi: 'BSIC Capital SA',
+          sector: 'Agroalimentaire',
           quantity: 5,
           totalCost: 260000,
           currentValueFcfa: 73500,
           gainLossFcfa: -186500,
           gainLossPct: -71.73,
+        ),
+        Position(
+          symbol: 'SNTS',
+          sgi: 'BSIC Capital SA',
+          sector: 'Télécommunications',
+          quantity: 10,
+          totalCost: 100000,
+          currentValueFcfa: 120000,
+          gainLossFcfa: 20000,
+          gainLossPct: 20,
         ),
       ],
       sgiBreakdown: const <SgiSummary>[
@@ -69,16 +102,48 @@ class _FakeRepository extends PortfolioRepository {
         ),
         SgiSummary(
           sgi: 'BSIC Capital SA',
-          positionsCount: 1,
-          quantity: 5,
-          totalCostFcfa: 260000,
-          currentValueFcfa: 73500,
-          gainLossFcfa: -186500,
-          gainLossPct: -71.73,
-          dividendsFcfa: 0,
+          positionsCount: 2,
+          quantity: 15,
+          totalCostFcfa: 360000,
+          currentValueFcfa: 193500,
+          gainLossFcfa: -166500,
+          gainLossPct: -46.25,
+          dividendsFcfa: 500,
         ),
       ],
+      dividends: dividends,
     );
+  }
+
+  @override
+  Future<String?> updateDividend(
+    int dividendId, {
+    double? amount,
+    String? paymentDate,
+    String? sgi,
+  }) async {
+    dividends = <DividendEntry>[
+      for (final dividend in dividends)
+        if (dividend.id == dividendId)
+          DividendEntry(
+            id: dividend.id,
+            symbol: dividend.symbol,
+            sgi: sgi ?? dividend.sgi,
+            sector: dividend.sector,
+            amount: amount ?? dividend.amount,
+            paymentDate: paymentDate ?? dividend.paymentDate,
+          )
+        else
+          dividend,
+    ];
+    return null;
+  }
+
+  @override
+  Future<void> deleteDividend(int dividendId) async {
+    dividends = dividends
+        .where((dividend) => dividend.id != dividendId)
+        .toList();
   }
 
   @override
@@ -109,6 +174,13 @@ class _FakeRepository extends PortfolioRepository {
 }
 
 void main() {
+  // find.byType(SegmentedButton) chercherait SegmentedButton<dynamic> et
+  // raterait SegmentedButton<_PortfolioTab> : on passe par un prédicat.
+  Finder segmentedTab(String label) => find.descendant(
+    of: find.byWidgetPredicate((widget) => widget is SegmentedButton),
+    matching: find.text(label),
+  );
+
   test('signed FCFA formatting includes amounts and signs', () {
     expect(formatSignedFcfa(12000), '+12\u202f000 FCFA');
     expect(formatSignedFcfa(-500), '-500 FCFA');
@@ -315,28 +387,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('SGI allocation chart shows pie and per-SGI totals', (
+  testWidgets('allocation chart shows SGI pie and per-SGI totals', (
     tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: PortfolioSgiChart(
-          breakdown: <SgiSummary>[
-            SgiSummary(
-              sgi: 'PHOENIX CAPITAL MANAGEMENT',
-              positionsCount: 1,
-              quantity: 12,
-              totalCostFcfa: 100000,
-              currentValueFcfa: 112000,
-              gainLossFcfa: 12000,
-              gainLossPct: 12,
-              dividendsFcfa: 5000,
-            ),
-          ],
+        home: PortfolioAllocationChart(
+          data: PortfolioData(
+            summary: const PortfolioSummary(),
+            positions: const <Position>[],
+            sgiBreakdown: const <SgiSummary>[
+              SgiSummary(
+                sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                positionsCount: 1,
+                quantity: 12,
+                totalCostFcfa: 100000,
+                currentValueFcfa: 112000,
+                gainLossFcfa: 12000,
+                gainLossPct: 12,
+                dividendsFcfa: 5000,
+              ),
+            ],
+          ),
         ),
       ),
     );
     expect(find.text('Répartition par SGI'), findsOneWidget);
+    expect(find.text('SGI'), findsOneWidget);
+    expect(find.text('Actions'), findsOneWidget);
+    expect(find.text('Secteurs'), findsOneWidget);
     expect(find.text('Valeur'), findsOneWidget);
     expect(find.text('Dividendes'), findsOneWidget);
     expect(find.text('PHOENIX CAPITAL MANAGEMENT'), findsOneWidget);
@@ -344,34 +423,38 @@ void main() {
     expect(find.textContaining('5\u202f000'), findsOneWidget);
   });
 
-  testWidgets('SGI allocation chart dividends view plots dividend shares', (
+  testWidgets('allocation chart dividends view plots dividend shares', (
     tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: PortfolioSgiChart(
-          breakdown: <SgiSummary>[
-            SgiSummary(
-              sgi: 'PHOENIX CAPITAL MANAGEMENT',
-              positionsCount: 1,
-              quantity: 12,
-              totalCostFcfa: 100000,
-              currentValueFcfa: 112000,
-              gainLossFcfa: 12000,
-              gainLossPct: 12,
-              dividendsFcfa: 5000,
-            ),
-            SgiSummary(
-              sgi: 'BSIC Capital SA',
-              positionsCount: 1,
-              quantity: 5,
-              totalCostFcfa: 60000,
-              currentValueFcfa: 70000,
-              gainLossFcfa: 10000,
-              gainLossPct: 16.67,
-              dividendsFcfa: 0,
-            ),
-          ],
+        home: PortfolioAllocationChart(
+          data: PortfolioData(
+            summary: const PortfolioSummary(),
+            positions: const <Position>[],
+            sgiBreakdown: const <SgiSummary>[
+              SgiSummary(
+                sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                positionsCount: 1,
+                quantity: 12,
+                totalCostFcfa: 100000,
+                currentValueFcfa: 112000,
+                gainLossFcfa: 12000,
+                gainLossPct: 12,
+                dividendsFcfa: 5000,
+              ),
+              SgiSummary(
+                sgi: 'BSIC Capital SA',
+                positionsCount: 1,
+                quantity: 5,
+                totalCostFcfa: 60000,
+                currentValueFcfa: 70000,
+                gainLossFcfa: 10000,
+                gainLossPct: 16.67,
+                dividendsFcfa: 0,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -390,6 +473,92 @@ void main() {
     expect(pie.data.sections, hasLength(1));
     expect(pie.data.sections.single.value, 5000);
     expect(pie.data.sections.single.title, '100%');
+  });
+
+  testWidgets('allocation chart switches to actions and sectors views', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PortfolioAllocationChart(
+          data: PortfolioData(
+            summary: const PortfolioSummary(),
+            positions: const <Position>[
+              Position(
+                symbol: 'NTLC',
+                sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                sector: 'Agroalimentaire',
+                quantity: 8,
+                totalCost: 400000,
+                currentValueFcfa: 117600,
+                gainLossFcfa: -282400,
+                gainLossPct: -70.6,
+              ),
+              Position(
+                symbol: 'NTLC',
+                sgi: 'BSIC Capital SA',
+                sector: 'Agroalimentaire',
+                quantity: 5,
+                totalCost: 260000,
+                currentValueFcfa: 73500,
+                gainLossFcfa: -186500,
+                gainLossPct: -71.73,
+              ),
+              Position(
+                symbol: 'SNTS',
+                sgi: 'BSIC Capital SA',
+                sector: 'Télécommunications',
+                quantity: 10,
+                totalCost: 100000,
+                currentValueFcfa: 120000,
+                gainLossFcfa: 20000,
+                gainLossPct: 20,
+              ),
+            ],
+            sgiBreakdown: const <SgiSummary>[],
+            dividends: const <DividendEntry>[
+              DividendEntry(
+                id: 1,
+                symbol: 'NTLC',
+                sgi: 'PHOENIX CAPITAL MANAGEMENT',
+                sector: 'Agroalimentaire',
+                amount: 1000,
+                paymentDate: '2026-01-20',
+              ),
+              DividendEntry(
+                id: 2,
+                symbol: 'SNTS',
+                sgi: 'BSIC Capital SA',
+                sector: 'Télécommunications',
+                amount: 500,
+                paymentDate: '2026-02-10',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Vue « Actions » : les deux positions NTLC (SGI différentes)
+    // fusionnent en une seule part par société.
+    await tester.tap(find.text('Actions'));
+    await tester.pumpAndSettle();
+    expect(find.text('Répartition par actions'), findsOneWidget);
+    PieChart pie = tester.widget<PieChart>(find.byType(PieChart));
+    expect(pie.data.sections, hasLength(2));
+    expect(find.text('NTLC'), findsOneWidget);
+    expect(find.text('SNTS'), findsOneWidget);
+    expect(find.textContaining('2 position(s)'), findsOneWidget);
+
+    // Vue « Secteurs » : regroupement par secteur d'activité.
+    await tester.tap(find.text('Secteurs'));
+    await tester.pumpAndSettle();
+    expect(find.text('Répartition par secteur'), findsOneWidget);
+    pie = tester.widget<PieChart>(find.byType(PieChart));
+    expect(pie.data.sections, hasLength(2));
+    expect(find.text('Agroalimentaire'), findsOneWidget);
+    expect(find.text('Télécommunications'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('edit lot dialog fits when the keyboard shrinks it', (
@@ -511,6 +680,111 @@ void main() {
       tester.element(find.byType(PortfolioScreen)),
     );
     expect(container.read(portfolioSgiFilterProvider), 'BSIC Capital SA');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('holdings card switches between positions and dividends', (
+    tester,
+  ) async {
+    // Grande surface : toute la page est visible sans défilement.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 3200);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          portfolioRepositoryProvider.overrideWithValue(_FakeRepository()),
+        ],
+        child: const MaterialApp(home: PortfolioScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+
+    // Onglet Positions par défaut : les filtres gains/pertes sont visibles
+    // (« Tous » existe aussi dans le filtre SGI de l'AppBar → on cible les
+    // ChoiceChip de la carte).
+    expect(find.widgetWithText(ChoiceChip, 'Tous'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Gains'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Pertes'), findsOneWidget);
+
+    // Bascule vers Dividendes : les filtres disparaissent et les
+    // dividendes sont listés avec leurs actions.
+    await tester.tap(segmentedTab('Dividendes'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ChoiceChip, 'Tous'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, 'Gains'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, 'Pertes'), findsNothing);
+    expect(find.text('Payé le 2026-01-20'), findsOneWidget);
+    expect(find.text('Payé le 2026-02-10'), findsOneWidget);
+    expect(find.byTooltip('Modifier le dividende'), findsNWidgets(2));
+    expect(find.byTooltip('Supprimer le dividende'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('dividend edit dialog opens from the holdings card', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 3200);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          brokersProvider.overrideWith((ref) async => <BrokerEntry>[]),
+          portfolioRepositoryProvider.overrideWithValue(_FakeRepository()),
+        ],
+        child: const MaterialApp(home: PortfolioScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(segmentedTab('Dividendes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Modifier le dividende').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Modifier le dividende NTLC'), findsOneWidget);
+    expect(find.text('Montant du dividende (FCFA)'), findsOneWidget);
+    expect(find.textContaining('Date de paiement'), findsOneWidget);
+    expect(find.text('Enregistrer'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('dividend deletion asks for confirmation', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 3200);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          portfolioRepositoryProvider.overrideWithValue(_FakeRepository()),
+        ],
+        child: const MaterialApp(home: PortfolioScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(segmentedTab('Dividendes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Supprimer le dividende').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Supprimer ce dividende ?'), findsOneWidget);
+
+    await tester.tap(find.text('Supprimer'));
+    await tester.pumpAndSettle();
+    // Le dividende NTLC est retiré ; celui de SNTS reste affiché.
+    expect(find.text('Payé le 2026-01-20'), findsNothing);
+    expect(find.text('Payé le 2026-02-10'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

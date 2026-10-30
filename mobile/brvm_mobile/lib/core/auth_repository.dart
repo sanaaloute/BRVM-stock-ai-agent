@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import 'api_client.dart';
@@ -133,6 +135,104 @@ class AuthRepository {
       }
       final (message, _) = _parseDetail(e.response?.data);
       throw AuthException(message ?? 'Erreur réseau. Vérifiez votre connexion.');
+    }
+  }
+
+  /// Mise à jour du profil (PUT /mobile/v1/me) : nom, e-mail, téléphone.
+  /// `null` = champ inchangé ; chaîne vide = effacer. Le mot de passe actuel
+  /// est exigé pour les comptes qui en ont un : 401 → incorrect ;
+  /// 409 → identifiant déjà pris par un autre compte.
+  Future<AuthUser> updateProfile({
+    String? name,
+    String? email,
+    String? phone,
+    String? currentPassword,
+  }) async {
+    try {
+      final response = await _api.put(
+        '${AppConfig.apiPrefix}/me',
+        data: <String, dynamic>{
+          'display_name': ?name,
+          'email': ?email,
+          'phone': ?phone,
+          'current_password': ?currentPassword,
+        },
+      );
+      return AuthUser.fromJson(asMap(response.data));
+    } on DioException catch (e) {
+      switch (e.response?.statusCode) {
+        case 401:
+          throw const AuthException('Mot de passe incorrect.');
+        case 409:
+          throw const AuthException(
+            'Cet e-mail/numéro est déjà utilisé par un autre compte.',
+          );
+        default:
+          final (message, _) = _parseDetail(e.response?.data);
+          throw AuthException(
+            message ?? 'Impossible d’enregistrer le profil.',
+          );
+      }
+    }
+  }
+
+  /// Photo de profil (octets bruts), `null` si le compte n'en a pas.
+  Future<Uint8List?> fetchPhoto() async {
+    try {
+      final response = await _api.get(
+        '${AppConfig.apiPrefix}/me/photo',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final data = response.data;
+      if (data is List<int>) return Uint8List.fromList(data);
+      return null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Téléverse la photo de profil (JPEG/PNG/WebP, 2 Mo max).
+  Future<void> uploadPhoto(Uint8List bytes, String filename) async {
+    try {
+      await _api.post(
+        '${AppConfig.apiPrefix}/me/photo',
+        data: FormData.fromMap(<String, dynamic>{
+          'file': MultipartFile.fromBytes(bytes, filename: filename),
+        }),
+      );
+    } on DioException catch (e) {
+      final (message, _) = _parseDetail(e.response?.data);
+      throw AuthException(message ?? 'Impossible d’envoyer la photo.');
+    }
+  }
+
+  Future<void> deletePhoto() async {
+    await _api.delete('${AppConfig.apiPrefix}/me/photo');
+  }
+
+  /// Changement de mot de passe : 401 → mot de passe actuel incorrect ;
+  /// 400 → nouveau mot de passe trop faible.
+  Future<void> changePassword({
+    String? currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      await _api.post(
+        '${AppConfig.apiPrefix}/me/password',
+        data: <String, dynamic>{
+          'current_password': ?currentPassword,
+          'new_password': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw const AuthException('Mot de passe actuel incorrect.');
+      }
+      final (message, _) = _parseDetail(e.response?.data);
+      throw AuthException(
+        message ?? 'Impossible de changer le mot de passe.',
+      );
     }
   }
 

@@ -7,15 +7,18 @@ import '../../core/format.dart';
 import '../../core/ui.dart';
 import '../market/market_models.dart';
 import '../market/market_providers.dart';
+import 'portfolio_allocation_chart.dart';
 import 'portfolio_chart.dart';
 import 'portfolio_import_dialog.dart';
 import 'portfolio_models.dart';
-import 'portfolio_sgi_chart.dart';
 import 'portfolio_providers.dart';
 
 /// Onglet « Portefeuille » : valorisation agrégée des positions, chaque
 /// position regroupant ses lignes d'achat (lots).
 enum _PositionFilter { all, gain, loss }
+
+/// Onglets de la carte du bas : positions ou dividendes.
+enum _PortfolioTab { positions, dividends }
 
 List<BrokerEntry> _sortedBrokers(Iterable<dynamic> brokers) {
   final sorted = brokers
@@ -71,6 +74,7 @@ class PortfolioScreen extends ConsumerStatefulWidget {
 class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
   final _searchController = TextEditingController();
   _PositionFilter _filter = _PositionFilter.all;
+  _PortfolioTab _tab = _PortfolioTab.positions;
 
   @override
   void dispose() {
@@ -119,6 +123,11 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
             return normalizeForSearch(position.symbol).contains(query) ||
                 normalizeForSearch(position.sgi).contains(query);
           }).toList();
+          final visibleDividends = data.dividends.where((dividend) {
+            if (query.isEmpty) return true;
+            return normalizeForSearch(dividend.symbol).contains(query) ||
+                normalizeForSearch(dividend.sgi).contains(query);
+          }).toList();
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(portfolioProvider),
             child: ListView(
@@ -129,29 +138,9 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
                 const SizedBox(height: 16),
                 const PortfolioHistoryChart(),
                 const SizedBox(height: 16),
-                PortfolioSgiChart(breakdown: data.sgiBreakdown),
+                PortfolioAllocationChart(data: data),
                 const SizedBox(height: 16),
-                _buildFilters(),
-                const SizedBox(height: 8),
-                Text(
-                  'Positions',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                if (visible.isEmpty)
-                  EmptyView(
-                    message: data.positions.isEmpty
-                        ? 'Votre portefeuille est vide.'
-                        : 'Aucune position ne correspond aux filtres.',
-                    icon: Icons.pie_chart_outline,
-                    onRetry: data.positions.isEmpty
-                        ? () => ref.invalidate(portfolioProvider)
-                        : null,
-                  )
-                else
-                  ...visible.map(
-                    (position) => _PositionCard(position: position),
-                  ),
+                _buildHoldingsCard(data, visible, visibleDividends),
               ],
             ),
           );
@@ -160,41 +149,123 @@ class _PortfolioScreenState extends ConsumerState<PortfolioScreen> {
     );
   }
 
-  Widget _buildFilters() {
-    return Column(
-      children: <Widget>[
-        TextField(
-          controller: _searchController,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search),
-            hintText: 'Rechercher un titre ou une SGI',
-            border: OutlineInputBorder(),
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
+  /// Carte unique du bas : recherche, filtres et listes Positions /
+  /// Dividendes, dans le même esprit que les trois cartes du dessus.
+  Widget _buildHoldingsCard(
+    PortfolioData data,
+    List<Position> visible,
+    List<DividendEntry> visibleDividends,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            ChoiceChip(
-              label: const Text('Tous'),
-              selected: _filter == _PositionFilter.all,
-              onSelected: (_) => setState(() => _filter = _PositionFilter.all),
+            SegmentedButton<_PortfolioTab>(
+              segments: const <ButtonSegment<_PortfolioTab>>[
+                ButtonSegment<_PortfolioTab>(
+                  value: _PortfolioTab.positions,
+                  label: Text('Positions'),
+                  icon: Icon(Icons.pie_chart_outline),
+                ),
+                ButtonSegment<_PortfolioTab>(
+                  value: _PortfolioTab.dividends,
+                  label: Text('Dividendes'),
+                  icon: Icon(Icons.payments_outlined),
+                ),
+              ],
+              selected: <_PortfolioTab>{_tab},
+              onSelectionChanged: (selection) {
+                setState(() => _tab = selection.first);
+              },
             ),
-            ChoiceChip(
-              label: const Text('Gains'),
-              selected: _filter == _PositionFilter.gain,
-              onSelected: (_) => setState(() => _filter = _PositionFilter.gain),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Rechercher un titre ou une SGI',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
             ),
-            ChoiceChip(
-              label: const Text('Pertes'),
-              selected: _filter == _PositionFilter.loss,
-              onSelected: (_) => setState(() => _filter = _PositionFilter.loss),
-            ),
+            // Les filtres gains/pertes ne s'appliquent pas aux dividendes.
+            if (_tab == _PortfolioTab.positions) ...<Widget>[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: <Widget>[
+                  ChoiceChip(
+                    label: const Text('Tous'),
+                    selected: _filter == _PositionFilter.all,
+                    onSelected: (_) =>
+                        setState(() => _filter = _PositionFilter.all),
+                  ),
+                  ChoiceChip(
+                    label: const Text('Gains'),
+                    selected: _filter == _PositionFilter.gain,
+                    onSelected: (_) =>
+                        setState(() => _filter = _PositionFilter.gain),
+                  ),
+                  ChoiceChip(
+                    label: const Text('Pertes'),
+                    selected: _filter == _PositionFilter.loss,
+                    onSelected: (_) =>
+                        setState(() => _filter = _PositionFilter.loss),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            if (_tab == _PortfolioTab.positions)
+              ..._buildPositions(data, visible)
+            else
+              ..._buildDividends(data, visibleDividends),
           ],
         ),
-      ],
+      ),
     );
+  }
+
+  List<Widget> _buildPositions(PortfolioData data, List<Position> visible) {
+    if (visible.isEmpty) {
+      return <Widget>[
+        EmptyView(
+          message: data.positions.isEmpty
+              ? 'Votre portefeuille est vide.'
+              : 'Aucune position ne correspond aux filtres.',
+          icon: Icons.pie_chart_outline,
+          onRetry: data.positions.isEmpty
+              ? () => ref.invalidate(portfolioProvider)
+              : null,
+        ),
+      ];
+    }
+    return <Widget>[
+      ...visible.map((position) => _PositionCard(position: position)),
+    ];
+  }
+
+  List<Widget> _buildDividends(
+    PortfolioData data,
+    List<DividendEntry> visibleDividends,
+  ) {
+    if (visibleDividends.isEmpty) {
+      return <Widget>[
+        EmptyView(
+          message: data.dividends.isEmpty
+              ? 'Aucun dividende enregistré.'
+              : 'Aucun dividende ne correspond à la recherche.',
+          icon: Icons.payments_outlined,
+        ),
+      ];
+    }
+    return <Widget>[
+      ...visibleDividends.map(
+        (dividend) => _DividendCard(dividend: dividend),
+      ),
+    ];
   }
 }
 
@@ -1000,6 +1071,311 @@ class _EditLotDialogState extends ConsumerState<_EditLotDialog> {
                 _buyDate == null
                     ? 'Date d’achat'
                     : 'Date d’achat : ${_buyDate!.toIso8601String().substring(0, 10)}',
+              ),
+            ),
+            if (_error != null) FormError(message: _error!),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Enregistrer'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Ligne de dividende : symbole, SGI, date de paiement, montant, avec
+/// actions de modification et de suppression.
+class _DividendCard extends ConsumerWidget {
+  const _DividendCard({required this.dividend});
+
+  final DividendEntry dividend;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    dividend.symbol,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    dividend.sgi,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.muted,
+                    ),
+                  ),
+                  if (dividend.paymentDate != null) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Payé le ${dividend.paymentDate}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.muted,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Text(
+              formatFcfa(dividend.amount),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: colors.tertiary,
+                fontWeight: FontWeight.w600,
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Modifier le dividende',
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              onPressed: () => _editDividend(context),
+            ),
+            IconButton(
+              tooltip: 'Supprimer le dividende',
+              icon: Icon(
+                Icons.delete_outline,
+                size: 18,
+                color: colors.loss,
+              ),
+              onPressed: () => _confirmDelete(context, ref),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editDividend(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _EditDividendDialog(dividend: dividend),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer ce dividende ?'),
+        content: const Text(
+          'Ce dividende sera retiré de votre portefeuille.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    final id = dividend.id;
+    if (confirmed == true && id != null) {
+      await ref.read(portfolioProvider.notifier).deleteDividend(id);
+    }
+  }
+}
+
+/// Dialogue de modification d'un dividende : montant, date de paiement, SGI.
+class _EditDividendDialog extends ConsumerStatefulWidget {
+  const _EditDividendDialog({required this.dividend});
+
+  final DividendEntry dividend;
+
+  @override
+  ConsumerState<_EditDividendDialog> createState() =>
+      _EditDividendDialogState();
+}
+
+class _EditDividendDialogState extends ConsumerState<_EditDividendDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _amountController;
+  DateTime? _paymentDate;
+  bool _saving = false;
+  String? _error;
+  late String _sgi;
+
+  @override
+  void initState() {
+    super.initState();
+    _sgi = widget.dividend.sgi;
+    _amountController = TextEditingController(
+      text: widget.dividend.amount?.toString() ?? '',
+    );
+    if (widget.dividend.paymentDate != null) {
+      _paymentDate = DateTime.tryParse(widget.dividend.paymentDate!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _paymentDate ?? DateTime.now(),
+      firstDate: DateTime(1998), // Création de la BRVM.
+      lastDate: DateTime.now(),
+      locale: const Locale('fr', 'FR'),
+    );
+    if (picked != null) setState(() => _paymentDate = picked);
+  }
+
+  Future<void> _save() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_paymentDate == null) {
+      setState(() => _error = 'Sélectionnez la date de paiement.');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _saving = true;
+    });
+    final dividendId = widget.dividend.id;
+    if (dividendId == null) {
+      setState(() {
+        _saving = false;
+        _error = 'Identifiant du dividende manquant.';
+      });
+      return;
+    }
+    final message = await ref
+        .read(portfolioProvider.notifier)
+        .updateDividend(
+          dividendId,
+          amount: double.parse(_amountController.text.replaceAll(',', '.')),
+          paymentDate: _paymentDate!.toIso8601String().substring(0, 10),
+          sgi: _sgi,
+        );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (message == null) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _error = message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Modifier le dividende ${widget.dividend.symbol}'),
+      // Défilement activé : quand le clavier réduit la hauteur du dialogue,
+      // le contenu défile au lieu de déborder (comme _EditLotDialog).
+      scrollable: true,
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Builder(
+              builder: (context) {
+                final brokers = _sortedBrokers(
+                  ref.watch(brokersProvider).valueOrNull ?? const <dynamic>[],
+                );
+                // La valeur courante doit toujours figurer dans les items,
+                // même si la liste des courtiers n'est pas encore chargée —
+                // sinon le DropdownButtonFormField lève une assertion.
+                final missingCurrent = _sgi != 'Non affecté' &&
+                    brokers.every((broker) => broker.name != _sgi);
+                return DropdownButtonFormField<String>(
+                  initialValue: _sgi,
+                  isExpanded: true,
+                  itemHeight: 72,
+                  selectedItemBuilder: (context) => <Widget>[
+                    ..._selectedBrokerItems(brokers, 'Non affecté'),
+                    if (missingCurrent)
+                      Text(_sgi, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'SGI',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: <DropdownMenuItem<String>>[
+                    const DropdownMenuItem<String>(
+                      value: 'Non affecté',
+                      child: Text('Non affecté'),
+                    ),
+                    for (final broker in brokers)
+                      DropdownMenuItem<String>(
+                        value: broker.name as String,
+                        child: _SgiOption(broker: broker),
+                      ),
+                    if (missingCurrent)
+                      DropdownMenuItem<String>(
+                        value: _sgi,
+                        child: Text(_sgi),
+                      ),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _sgi = value ?? 'Non affecté'),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Montant du dividende (FCFA)',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) {
+                final parsed = double.tryParse(
+                  (value ?? '').replaceAll(',', '.'),
+                );
+                if (parsed == null || parsed <= 0) {
+                  return 'Saisissez un montant valide.';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _pickDate,
+              icon: const Icon(Icons.calendar_today),
+              label: Text(
+                _paymentDate == null
+                    ? 'Date de paiement'
+                    : 'Date de paiement : ${_paymentDate!.toIso8601String().substring(0, 10)}',
               ),
             ),
             if (_error != null) FormError(message: _error!),

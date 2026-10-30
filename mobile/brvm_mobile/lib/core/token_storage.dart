@@ -79,6 +79,11 @@ class TokenStorage {
     await _store.write(_kUser, jsonEncode(session.user.toJson()));
   }
 
+  /// Met à jour le profil stocké après une édition (jetons inchangés).
+  Future<void> saveUser(AuthUser user) async {
+    await _store.write(_kUser, jsonEncode(user.toJson()));
+  }
+
   Future<void> clear() async {
     for (final key in <String>[_kAccessToken, _kRefreshToken, _kUser]) {
       try {

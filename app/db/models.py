@@ -57,6 +57,10 @@ class AppUser(Base):
     # Password auth (scrypt, "salt$hash"); NULL until the user sets one. OTP
     # codes remain available as an alternative once delivery is configured.
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Profil éditable depuis l'app : nom affiché et photo (fichier local,
+    # chemin relatif dans le dossier des avatars).
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -36,6 +36,7 @@ class Position {
   const Position({
     required this.symbol,
     this.sgi = 'Non affecté',
+    this.sector,
     this.quantity,
     this.avgBuyPrice,
     this.totalCost,
@@ -49,6 +50,7 @@ class Position {
   factory Position.fromJson(Map<String, dynamic> json) => Position(
     symbol: asString(json['symbol']) ?? '',
     sgi: asString(json['sgi']) ?? 'Non affecté',
+    sector: asString(json['sector']),
     quantity: asDouble(json['quantity']),
     avgBuyPrice: asDouble(json['avg_buy_price']),
     totalCost: asDouble(json['total_cost']),
@@ -61,6 +63,7 @@ class Position {
 
   final String symbol;
   final String sgi;
+  final String? sector;
   final double? quantity;
   final double? avgBuyPrice;
   final double? totalCost;
@@ -69,6 +72,34 @@ class Position {
   final double? gainLossFcfa;
   final double? gainLossPct;
   final List<Lot> lots;
+}
+
+/// Dividende enregistré : une ligne de paiement unitaire.
+class DividendEntry {
+  const DividendEntry({
+    this.id,
+    required this.symbol,
+    this.sgi = 'Non affecté',
+    this.sector,
+    this.amount,
+    this.paymentDate,
+  });
+
+  factory DividendEntry.fromJson(Map<String, dynamic> json) => DividendEntry(
+    id: asInt(json['id']),
+    symbol: asString(json['symbol']) ?? '',
+    sgi: asString(json['sgi']) ?? 'Non affecté',
+    sector: asString(json['sector']),
+    amount: asDouble(json['amount']),
+    paymentDate: asString(json['payment_date']),
+  );
+
+  final int? id;
+  final String symbol;
+  final String sgi;
+  final String? sector;
+  final double? amount;
+  final String? paymentDate;
 }
 
 /// Synthèse du portefeuille.
@@ -147,6 +178,7 @@ class PortfolioData {
     required this.summary,
     required this.positions,
     required this.sgiBreakdown,
+    this.dividends = const <DividendEntry>[],
   });
 
   factory PortfolioData.fromJson(Map<String, dynamic> json) => PortfolioData(
@@ -157,11 +189,15 @@ class PortfolioData {
     sgiBreakdown: asMapList(
       json['sgi_breakdown'],
     ).map(SgiSummary.fromJson).toList(),
+    dividends: asMapList(
+      json['dividends'],
+    ).map(DividendEntry.fromJson).where((d) => d.symbol.isNotEmpty).toList(),
   );
 
   final PortfolioSummary summary;
   final List<Position> positions;
   final List<SgiSummary> sgiBreakdown;
+  final List<DividendEntry> dividends;
 }
 
 class SgiTransaction {

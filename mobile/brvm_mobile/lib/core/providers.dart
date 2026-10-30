@@ -163,6 +163,64 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Met à jour le profil puis propage le nouvel utilisateur (état + stockage).
+  /// Retourne `null` si OK, sinon le message d'erreur.
+  Future<String?> updateProfile({
+    String? name,
+    String? email,
+    String? phone,
+    String? currentPassword,
+  }) async {
+    try {
+      final user = await _ref
+          .read(authRepositoryProvider)
+          .updateProfile(
+            name: name,
+            email: email,
+            phone: phone,
+            currentPassword: currentPassword,
+          );
+      await _ref.read(storageProvider).saveUser(user);
+      state = AuthAuthenticated(user);
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    }
+  }
+
+  /// Recharge le profil depuis /me (après un upload/suppression de photo)
+  /// et propage l'utilisateur à jour.
+  Future<void> refreshProfile() async {
+    try {
+      final user = await _ref.read(authRepositoryProvider).me();
+      await _ref.read(storageProvider).saveUser(user);
+      state = AuthAuthenticated(user);
+    } catch (_) {
+      // Non bloquant : l'écran garde le repli sur l'utilisateur de session.
+    }
+  }
+
+  /// Change le mot de passe (comptes avec mot de passe : le mot de passe
+  /// actuel est exigé). Retourne `null` si OK, sinon le message d'erreur.
+  Future<String?> changePassword({
+    String? currentPassword,
+    required String newPassword,
+  }) async {
+    try {
+      await _ref
+          .read(authRepositoryProvider)
+          .changePassword(
+            currentPassword: currentPassword,
+            newPassword: newPassword,
+          );
+    } on AuthException catch (e) {
+      return e.message;
+    }
+    // Le compte a désormais forcément un mot de passe → profil à jour.
+    await refreshProfile();
+    return null;
+  }
+
   Future<void> signOut() async {
     final storage = _ref.read(storageProvider);
     final refreshToken = await storage.readRefreshToken();

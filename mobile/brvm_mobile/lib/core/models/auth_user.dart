@@ -7,6 +7,8 @@ class AuthUser {
     required this.id,
     this.email,
     this.phone,
+    this.name,
+    this.hasPhoto = false,
     required this.hasTelegram,
     this.hasPassword = false,
   });
@@ -15,6 +17,8 @@ class AuthUser {
         id: asString(json['id']) ?? '',
         email: asString(json['email']),
         phone: asString(json['phone']),
+        name: asString(json['display_name']),
+        hasPhoto: asBool(json['has_photo']),
         hasTelegram: asBool(json['has_telegram']),
         hasPassword: asBool(json['has_password']),
       );
@@ -22,19 +26,27 @@ class AuthUser {
   final String id;
   final String? email;
   final String? phone;
+
+  /// Nom affiché, choisi par l'utilisateur (null tant qu'il n'est pas défini).
+  final String? name;
+
+  /// `true` si une photo de profil a été téléversée (GET /mobile/v1/me/photo).
+  final bool hasPhoto;
   final bool hasTelegram;
 
   /// `true` si le compte a un mot de passe (faux pour les comptes démo) :
   /// la suppression de compte ne le demande que dans ce cas.
   final bool hasPassword;
 
-  /// Libellé d'affichage : e-mail ou téléphone selon ce qui existe.
-  String get displayName => email ?? phone ?? 'Utilisateur';
+  /// Libellé d'affichage : nom choisi, sinon e-mail ou téléphone.
+  String get displayName => name ?? email ?? phone ?? 'Utilisateur';
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'email': email,
         'phone': phone,
+        'display_name': name,
+        'has_photo': hasPhoto,
         'has_telegram': hasTelegram,
         'has_password': hasPassword,
       };

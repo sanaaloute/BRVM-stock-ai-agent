@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
@@ -49,5 +51,17 @@ final meProvider = FutureProvider.autoDispose<AuthUser>(
   (ref) {
     ref.watch(currentUserIdProvider);
     return ref.watch(authRepositoryProvider).me();
+  },
+);
+
+/// Photo de profil (octets) de l'utilisateur connecté, `null` si absente.
+/// Se recharge quand l'utilisateur de session change (refreshProfile après
+/// un upload/suppression).
+final userPhotoProvider = FutureProvider.autoDispose<Uint8List?>(
+  (ref) {
+    final auth = ref.watch(authStateProvider);
+    final user = auth is AuthAuthenticated ? auth.user : null;
+    if (user == null || !user.hasPhoto) return null;
+    return ref.watch(authRepositoryProvider).fetchPhoto();
   },
 );

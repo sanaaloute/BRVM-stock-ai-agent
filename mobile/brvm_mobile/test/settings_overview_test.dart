@@ -16,10 +16,59 @@ class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository({required this.user})
       : super(ApiClient(TokenStorage(MemoryKeyValueStore())));
 
-  final AuthUser user;
+  AuthUser user;
+  String? lastProfilePassword;
+  String? lastName;
+  String? currentGiven;
+  String? newPasswordGiven;
 
   @override
   Future<AuthUser> me() async => user;
+
+  @override
+  Future<AuthUser> updateProfile({
+    String? name,
+    String? email,
+    String? phone,
+    String? currentPassword,
+  }) async {
+    lastProfilePassword = currentPassword;
+    lastName = name;
+    if (user.hasPassword && currentPassword != 'secret') {
+      throw const AuthException('Mot de passe incorrect.');
+    }
+    user = AuthUser(
+      id: user.id,
+      email: email ?? user.email,
+      phone: phone ?? user.phone,
+      name: (name ?? '').isEmpty ? null : name,
+      hasPhoto: user.hasPhoto,
+      hasTelegram: user.hasTelegram,
+      hasPassword: user.hasPassword,
+    );
+    return user;
+  }
+
+  @override
+  Future<void> changePassword({
+    String? currentPassword,
+    required String newPassword,
+  }) async {
+    currentGiven = currentPassword;
+    newPasswordGiven = newPassword;
+    if (user.hasPassword && currentPassword != 'secret') {
+      throw const AuthException('Mot de passe actuel incorrect.');
+    }
+    user = AuthUser(
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      name: user.name,
+      hasPhoto: user.hasPhoto,
+      hasTelegram: user.hasTelegram,
+      hasPassword: true,
+    );
+  }
 }
 
 class _FakeSettingsRepository extends SettingsRepository {
@@ -64,6 +113,7 @@ Future<void> _pumpScreen(
   WidgetTester tester, {
   required AuthUser user,
   Map<String, dynamic> portfolioJson = _emptyPortfolioJson,
+  AuthRepository? authRepository,
 }) async {
   final storage = TokenStorage(MemoryKeyValueStore());
   await storage.saveSession(
@@ -80,7 +130,8 @@ Future<void> _pumpScreen(
     ProviderScope(
       overrides: <Override>[
         storageProvider.overrideWithValue(storage),
-        authRepositoryProvider.overrideWithValue(_FakeAuthRepository(user: user)),
+        authRepositoryProvider
+            .overrideWithValue(authRepository ?? _FakeAuthRepository(user: user)),
         settingsRepositoryProvider.overrideWithValue(_FakeSettingsRepository()),
         portfolioRepositoryProvider
             .overrideWithValue(_FakePortfolioRepository(portfolioJson)),
@@ -92,7 +143,7 @@ Future<void> _pumpScreen(
 }
 
 void main() {
-  testWidgets('en-tête profil : icône personne, nom dérivé et coordonnées',
+  testWidgets('en-tête profil : e-mail en titre (pas de nom), coordonnées',
       (tester) async {
     const user = AuthUser(
       id: 'u1',
@@ -102,14 +153,139 @@ void main() {
     );
     await _pumpScreen(tester, user: user);
 
-    // Nom dérivé de la partie locale de l'e-mail.
-    expect(find.text('Trader'), findsOneWidget);
-    // Icône personne dans la pastille profil.
-    expect(find.byIcon(Icons.person_outline), findsOneWidget);
-    // Coordonnées.
+    // Sans nom défini, l'e-mail sert de titre ; l'ID du compte n'est jamais
+    // affiché et le téléphone n'apparaît pas sur la carte.
     expect(find.text('trader@brvm.ci'), findsOneWidget);
-    expect(find.text('+2250701020304'), findsOneWidget);
+    expect(find.text('u1'), findsNothing);
+    expect(find.text('+2250701020304'), findsNothing);
+    // Icône personne dans la pastille profil (pas de photo).
+    expect(find.byIcon(Icons.person_outline), findsOneWidget);
     expect(find.text('Telegram lié'), findsOneWidget);
+    // Actions profil.
+    expect(find.byTooltip('Modifier le profil'), findsOneWidget);
+    expect(find.text('Définir un mot de passe'), findsOneWidget);
+  });
+
+  testWidgets('en-tête profil : nom choisi + e-mail en gris, mot de passe',
+      (tester) async {
+    const user = AuthUser(
+      id: 'u1',
+      email: 'trader@brvm.ci',
+      name: 'Awa Koné',
+      hasTelegram: false,
+      hasPassword: true,
+    );
+    await _pumpScreen(tester, user: user);
+
+    expect(find.text('Awa Koné'), findsOneWidget);
+    // E-mail en gris sous le nom (plus de lignes de coordonnées).
+    expect(find.text('trader@brvm.ci'), findsOneWidget);
+    expect(find.textContaining('ID'), findsNothing);
+    expect(find.text('Changer le mot de passe'), findsOneWidget);
+  });
+
+  testWidgets('édition du profil : mot de passe actuel exigé puis enregistré',
+      (tester) async {
+    const user = AuthUser(
+      id: 'u1',
+      email: 'trader@brvm.ci',
+      hasTelegram: false,
+      hasPassword: true,
+    );
+    final repo = _FakeAuthRepository(user: user);
+    await _pumpScreen(tester, user: user, authRepository: repo);
+
+    await tester.tap(find.byTooltip('Modifier le profil'));
+    await tester.pumpAndSettle();
+    expect(find.text('Modifier le profil'), findsOneWidget);
+    expect(find.text('ID du compte'), findsNothing);
+    expect(find.text('Mot de passe actuel (confirmation)'), findsOneWidget);
+
+    // L'icône afficher/masquer bascule l'obscurcissement du mot de passe.
+    expect(find.byIcon(Icons.visibility_outlined), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.visibility_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Nom complet (facultatif)'),
+      'Awa Koné',
+    );
+    // Sans confirmation → erreur, rien n'est envoyé.
+    await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Confirmez votre mot de passe actuel pour enregistrer.'),
+      findsOneWidget,
+    );
+    expect(repo.lastName, isNull);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Mot de passe actuel (confirmation)'),
+      'secret',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(repo.lastProfilePassword, 'secret');
+    expect(repo.lastName, 'Awa Koné');
+    expect(find.text('Awa Koné'), findsOneWidget);
+    // L'e-mail passe en gris sous le nom.
+    expect(find.text('trader@brvm.ci'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('changement de mot de passe : confirmation puis succès',
+      (tester) async {
+    const user = AuthUser(
+      id: 'u1',
+      email: 'trader@brvm.ci',
+      hasTelegram: false,
+      hasPassword: true,
+    );
+    final repo = _FakeAuthRepository(user: user);
+    await _pumpScreen(tester, user: user, authRepository: repo);
+
+    await tester.tap(find.text('Changer le mot de passe'));
+    await tester.pumpAndSettle();
+    // Rangée de la carte + titre du dialogue.
+    expect(find.text('Changer le mot de passe'), findsNWidgets(2));
+    // Chaque champ mot de passe a son icône afficher/masquer.
+    expect(find.byIcon(Icons.visibility_outlined), findsNWidgets(3));
+    await tester.tap(find.byIcon(Icons.visibility_outlined).first);
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Mot de passe actuel'),
+      'secret',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Nouveau mot de passe'),
+      'abcdef',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Confirmer le nouveau mot de passe'),
+      'abcdeX',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('La confirmation ne correspond pas au nouveau mot de passe.'),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Confirmer le nouveau mot de passe'),
+      'abcdef',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(repo.currentGiven, 'secret');
+    expect(repo.newPasswordGiven, 'abcdef');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('carte portefeuille : valeur totale, performance, positions',

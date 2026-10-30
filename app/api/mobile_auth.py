@@ -59,6 +59,8 @@ def _public_user(user: dict[str, Any]) -> dict[str, Any]:
         "id": str(user["id"]),
         "email": user.get("email"),
         "phone": user.get("phone"),
+        "display_name": user.get("display_name"),
+        "has_photo": bool(user.get("has_photo")),
         "has_telegram": user.get("telegram_id") is not None,
         "has_password": bool(user.get("has_password")),
     }

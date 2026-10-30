@@ -15,6 +15,7 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -211,6 +212,8 @@ def _user_dict(row: models.AppUser) -> dict[str, Any]:
         "email": row.email,
         "phone": row.phone,
         "telegram_id": row.telegram_id,
+        "display_name": row.display_name,
+        "has_photo": row.photo_path is not None,
         # Boolean only — the hash itself must never leave this module.
         "has_password": row.password_hash is not None,
     }
@@ -514,6 +517,181 @@ def authenticate_user(identifier: str, password: str) -> dict[str, Any] | None:
     if not verify_password(password, stored):
         return None
     return user
+
+
+# --- Profil utilisateur (nom, coordonnées, photo, mot de passe) ----------------
+
+_UNSET: Any = object()  # sentinelle « argument non fourni »
+
+AVATAR_DIR = Path(__file__).resolve().parents[1] / "data" / "avatars"
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+DISPLAY_NAME_MAX_LENGTH = 60
+
+
+def _check_current_password(row: models.AppUser, current_password: str | None) -> str | None:
+    """'wrong_password' when the account has a password and the confirmation
+    is missing/wrong; None otherwise (passwordless demo accounts are exempt,
+    like in delete_app_user)."""
+    if row.password_hash is not None and (
+        not current_password or not verify_password(current_password, row.password_hash)
+    ):
+        return "wrong_password"
+    return None
+
+
+def update_profile(user_id: uuid.UUID, *, display_name: Any = _UNSET, email: Any = _UNSET, phone: Any = _UNSET, current_password: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+    """Edit display name / email / phone. Returns (user, None) or (None, error)
+    with 'not_found' | 'wrong_password' | 'invalid_identifier' |
+    'identifier_taken' | 'identifier_required'."""
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        row = s.execute(
+            select(models.AppUser).where(models.AppUser.id == user_id)
+        ).scalars().first()
+        if row is None:
+            return None, "not_found"
+        error = _check_current_password(row, current_password)
+        if error:
+            return None, error
+
+        values: dict[str, Any] = {}
+        if display_name is not _UNSET:
+            name = str(display_name or "").strip()[:DISPLAY_NAME_MAX_LENGTH]
+            values["display_name"] = name or None
+        new_email, new_phone = row.email, row.phone
+        if email is not _UNSET:
+            ident = str(email or "").strip()
+            if not ident:
+                new_email = None
+            else:
+                classified = classify_identifier(ident)
+                if not classified or classified[0] != "email":
+                    return None, "invalid_identifier"
+                new_email = classified[1]
+        if phone is not _UNSET:
+            ident = str(phone or "").strip()
+            if not ident:
+                new_phone = None
+            else:
+                classified = classify_identifier(ident)
+                if not classified or classified[0] != "phone":
+                    return None, "invalid_identifier"
+                new_phone = classified[1]
+        # Le compte doit garder au moins un identifiant de connexion.
+        if new_email is None and new_phone is None:
+            return None, "identifier_required"
+        for column, value in (
+            (models.AppUser.email, new_email),
+            (models.AppUser.phone, new_phone),
+        ):
+            if value is None:
+                continue
+            clash = s.execute(
+                select(models.AppUser.id).where(
+                    column == value, models.AppUser.id != user_id
+                )
+            ).first()
+            if clash is not None:
+                return None, "identifier_taken"
+        if email is not _UNSET:
+            values["email"] = new_email
+        if phone is not _UNSET:
+            values["phone"] = new_phone
+        if values:
+            s.execute(
+                update(models.AppUser)
+                .where(models.AppUser.id == user_id)
+                .values(**values)
+            )
+        refreshed = s.execute(
+            select(models.AppUser).where(models.AppUser.id == user_id)
+        ).scalars().first()
+        return _user_dict(refreshed), None
+
+
+def change_password(user_id: uuid.UUID, current_password: str | None, new_password: str) -> str | None:
+    """Returns None on success, else 'not_found' | 'wrong_password' | 'weak_password'."""
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        row = s.execute(
+            select(models.AppUser).where(models.AppUser.id == user_id)
+        ).scalars().first()
+        if row is None:
+            return "not_found"
+        error = _check_current_password(row, current_password)
+        if error:
+            return error
+        if len(new_password or "") < PASSWORD_MIN_LENGTH:
+            return "weak_password"
+        row.password_hash = hash_password(new_password)
+    return None
+
+
+def _sniff_image(data: bytes) -> str | None:
+    """File extension for JPEG/PNG/WebP from magic bytes (None otherwise)."""
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:4] == b"\x89PNG":
+        return ".png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def save_avatar(user_id: uuid.UUID, data: bytes) -> str | None:
+    """Store the profile photo. Returns None or 'too_large' | 'invalid_image'
+    | 'not_found'."""
+    if len(data) > MAX_AVATAR_BYTES:
+        return "too_large"
+    ext = _sniff_image(data)
+    if ext is None:
+        return "invalid_image"
+    db_migrate.ensure_schema()
+    filename = f"{user_id}{ext}"
+    with db_engine.session_scope() as s:
+        old = s.execute(
+            select(models.AppUser.photo_path).where(models.AppUser.id == user_id)
+        ).scalar_one_or_none()
+        res = s.execute(
+            update(models.AppUser)
+            .where(models.AppUser.id == user_id)
+            .values(photo_path=filename)
+        )
+        if not res.rowcount:
+            return "not_found"
+    if old and old != filename:
+        (AVATAR_DIR / old).unlink(missing_ok=True)
+    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    (AVATAR_DIR / filename).write_bytes(data)
+    return None
+
+
+def delete_avatar(user_id: uuid.UUID) -> None:
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        old = s.execute(
+            select(models.AppUser.photo_path).where(models.AppUser.id == user_id)
+        ).scalar_one_or_none()
+        s.execute(
+            update(models.AppUser)
+            .where(models.AppUser.id == user_id)
+            .values(photo_path=None)
+        )
+    if old:
+        (AVATAR_DIR / old).unlink(missing_ok=True)
+
+
+def avatar_file(user_id: uuid.UUID) -> Path | None:
+    """Stored photo path for the user (None when absent/missing on disk)."""
+    db_migrate.ensure_schema()
+    with db_engine.session_scope() as s:
+        name = s.execute(
+            select(models.AppUser.photo_path).where(models.AppUser.id == user_id)
+        ).scalar_one_or_none()
+    if not name:
+        return None
+    path = AVATAR_DIR / name
+    return path if path.is_file() else None
 
 
 # --- Devices (FCM push tokens) -------------------------------------------------
