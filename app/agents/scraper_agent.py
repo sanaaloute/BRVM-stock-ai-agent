@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from langgraph.prebuilt import create_react_agent
 
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.agents.utils import get_time_prefix
 from app.tools.stock_tools import (
     scrape_brvm,
@@ -30,5 +30,5 @@ SCRAPER_TOOLS = [
 
 
 def create_scraper_agent(model: str | None = None):
-    llm = get_llm(model=model)
+    llm = get_agent_llm("scraper", model=model)
     return create_react_agent(llm, SCRAPER_TOOLS)

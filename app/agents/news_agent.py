@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from langgraph.prebuilt import create_react_agent
 
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.tools.news_tools import (
     get_richbourse_dividends_tool,
     get_richbourse_prediction_tool,
@@ -40,5 +40,5 @@ def get_news_agent_system() -> str:
 
 
 def create_news_agent(model: str | None = None):
-    llm = get_llm(model=model)
+    llm = get_agent_llm("news", model=model)
     return create_react_agent(llm, NEWS_TOOLS)

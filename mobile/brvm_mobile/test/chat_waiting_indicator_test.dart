@@ -21,6 +21,13 @@ class _NeverCompletingChatRepository extends ChatRepository {
       Completer<ChatResponse>().future;
 
   @override
+  Stream<ChatStreamEvent> sendStream(String query, {String? threadId}) async* {
+    // Jamais émis, jamais terminé : la bulle de streaming reste vide et
+    // l'indicateur d'attente affiché.
+    await Completer<void>().future;
+  }
+
+  @override
   Future<List<String>> getSuggestions() async => <String>[];
 }
 

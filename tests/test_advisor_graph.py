@@ -109,7 +109,7 @@ class AdvisorFake(GenericFakeChatModel):
 
 
 def _patch_llm(fake):
-    """Point every get_llm consumer at the fake model (all workers build eagerly)."""
+    """Point every get_agent_llm consumer at the fake model (all workers build eagerly)."""
     import app.agents.graph as graph_mod
     import app.agents.nlu_agent as nlu_mod
     import app.agents.analytics_agent as analytics_mod
@@ -126,7 +126,7 @@ def _patch_llm(fake):
     for mod in (graph_mod, nlu_mod, analytics_mod, scraper_mod, timeseries_mod,
                 charts_mod, news_mod, portfolio_mod, prediction_mod, sgi_mod,
                 company_details_mod, advisor_mod):
-        mod.get_llm = lambda *a, **k: fake
+        mod.get_agent_llm = lambda *a, **k: fake
 
 
 def _use_temp_db():

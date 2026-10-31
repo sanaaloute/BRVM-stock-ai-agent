@@ -9,9 +9,49 @@ from typing import Any
 import config
 
 
-def create_afrikia_llm(model: str | None = None, temperature: float = 0, **kwargs: Any):
+_chat_openai_class = None
+
+
+def _get_chat_openai_class():
+    global _chat_openai_class
+    if _chat_openai_class is not None:
+        return _chat_openai_class
+    from langchain_core.messages import AIMessageChunk
     from langchain_openai import ChatOpenAI
 
+    class AfrikiaChatOpenAI(ChatOpenAI):
+        """ChatOpenAI that keeps the provider's `reasoning_content` stream
+        deltas: stock langchain-openai drops non-standard delta fields. They
+        land in AIMessageChunk.additional_kwargs["reasoning_content"] so
+        LangGraph (stream_mode="messages") can forward the thinking progress;
+        agent nodes strip them before messages reach state/memory."""
+
+        def _convert_chunk_to_generation_chunk(
+            self,
+            chunk: dict,
+            default_chunk_class: type,
+            base_generation_info: dict | None,
+        ):
+            generation_chunk = super()._convert_chunk_to_generation_chunk(
+                chunk, default_chunk_class, base_generation_info
+            )
+            if generation_chunk is not None and isinstance(
+                generation_chunk.message, AIMessageChunk
+            ):
+                choices = chunk.get("choices") or []
+                if choices:
+                    reasoning = (choices[0].get("delta") or {}).get("reasoning_content")
+                    if reasoning:
+                        generation_chunk.message.additional_kwargs[
+                            "reasoning_content"
+                        ] = reasoning
+            return generation_chunk
+
+    _chat_openai_class = AfrikiaChatOpenAI
+    return _chat_openai_class
+
+
+def create_afrikia_llm(model: str | None = None, temperature: float = 0, **kwargs: Any):
     model_name = model or config.LLM_MODEL or config.AFRIKIA_MODEL
     api_key = config.AFRIKIA_API_KEY
     if not api_key:
@@ -20,7 +60,7 @@ def create_afrikia_llm(model: str | None = None, temperature: float = 0, **kwarg
             "Set it in .env."
         )
 
-    return ChatOpenAI(
+    return _get_chat_openai_class()(
         model=model_name,
         temperature=temperature,
         api_key=api_key,

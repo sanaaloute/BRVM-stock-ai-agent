@@ -12,14 +12,20 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 import httpx
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 from langgraph.graph import StateGraph
 
 import config
-from app.models.llm import get_default_model, get_llm
+from app.models.llm import get_agent_llm, get_default_model
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.state import AgentState, NextWorker, WorkerName
@@ -190,7 +196,7 @@ def _condense_to_user_final_pairs(messages: list) -> list:
 def _build_supervisor_node(model: str):
     # Same per-task split as the NLU: routing label output runs on
     # ROUTER_MODEL (strict-format task), at temperature 0.
-    llm = get_llm(model=config.ROUTER_MODEL or model, temperature=0.0)
+    llm = get_agent_llm("supervisor", model=config.ROUTER_MODEL or model, temperature=0.0)
 
     def supervisor(state: AgentState) -> dict:
         logger.info("[GRAPH] node=supervisor start")
@@ -370,7 +376,7 @@ def _build_worker_node(
                     status=getattr(m, "status", "success"),
                 )
             capped.append(m)
-        out_messages = capped
+        out_messages = _strip_reasoning(capped)
         _log_tools_from_messages(out_messages, worker_name)
         out: dict = {"messages": out_messages, "next": "FINISH", "last_worker": worker_name}
         if extract_image_path:
@@ -663,24 +669,32 @@ def _extract_fresh_reply(messages: list, baseline: int) -> str | None:
     return None
 
 
-def run_agent(
-    query: str,
-    model: str | None = None,
-    thread_id: str | None = None,
-    telegram_user_id: int | None = None,
-    checkpointer: Any | None = None,
-) -> dict:
-    model = model or get_default_model()
-    graph = get_compiled_graph(model=model, checkpointer=checkpointer)
+def _strip_reasoning(messages: list) -> list:
+    """Remove provider reasoning traces (chain-of-thought) from AI messages:
+    thinking is streamed to clients as progress but must never persist into
+    state/memory — it bloats later prompts and must not leak into replies."""
+    for m in messages:
+        if isinstance(m, AIMessage) and m.additional_kwargs:
+            m.additional_kwargs.pop("reasoning_content", None)
+    return messages
+
+
+def _run_config(thread_id: str | None, telegram_user_id: int | None) -> dict:
     configurable: dict[str, Any] = {"thread_id": thread_id or "default"}
     if telegram_user_id is not None:
         # Server-verified identity: portfolio tools read it from here (never from
         # the model's tool arguments).
         configurable["telegram_user_id"] = telegram_user_id
-    run_config = {
+    return {
         "configurable": configurable,
         "recursion_limit": config.RECURSION_LIMIT,
     }
+
+
+def _initial_run_state(graph, run_config: dict, query: str, telegram_user_id: int | None):
+    """Shared prep for run_agent / run_agent_stream: condensed history plus the
+    new user message, with every per-run channel reset. Returns
+    (initial_state, baseline, condensed)."""
     current = graph.get_state(run_config)
     existing = (current.values or {}).get("messages") or []
     # Keep only last N messages as [user, final_ai, user, final_ai, ...]
@@ -705,24 +719,49 @@ def run_agent(
     }
     if telegram_user_id is not None:
         initial["telegram_user_id"] = telegram_user_id
+    return initial, baseline, condensed
 
-    def _revert_messages() -> None:
-        try:
-            graph.update_state(run_config, {"messages": condensed})
-        except Exception as upd_err:
-            logger.warning("Could not revert messages on failure: %s", upd_err)
 
-    def _persist_clarification(clarification: str) -> None:
-        """Save the clarifying exchange so the next turn has full context."""
-        try:
-            history = list(condensed) + [
-                HumanMessage(content=query),
-                AIMessage(content=clarification),
-            ]
-            max_messages = getattr(config, "MEMORY_MAX_MESSAGES", MEMORY_MAX_MESSAGES)
-            graph.update_state(run_config, {"messages": history[-max_messages:]})
-        except Exception as upd_err:
-            logger.warning("Could not persist clarification turn: %s", upd_err)
+def _revert_run_messages(graph, run_config: dict, condensed: list) -> None:
+    try:
+        graph.update_state(run_config, {"messages": condensed})
+    except Exception as upd_err:
+        logger.warning("Could not revert messages on failure: %s", upd_err)
+
+
+def _persist_clarification_turn(graph, run_config: dict, condensed: list, query: str, clarification: str) -> None:
+    """Save the clarifying exchange so the next turn has full context."""
+    try:
+        history = list(condensed) + [
+            HumanMessage(content=query),
+            AIMessage(content=clarification),
+        ]
+        max_messages = getattr(config, "MEMORY_MAX_MESSAGES", MEMORY_MAX_MESSAGES)
+        graph.update_state(run_config, {"messages": history[-max_messages:]})
+    except Exception as upd_err:
+        logger.warning("Could not persist clarification turn: %s", upd_err)
+
+
+def _persist_success(graph, run_config: dict, messages: list) -> None:
+    """Success: store only [user, final_ai, ...], last 10."""
+    new_condensed = _condense_to_user_final_pairs(messages)
+    try:
+        graph.update_state(run_config, {"messages": new_condensed})
+    except Exception as upd_err:
+        logger.warning("Could not update state with condensed messages: %s", upd_err)
+
+
+def run_agent(
+    query: str,
+    model: str | None = None,
+    thread_id: str | None = None,
+    telegram_user_id: int | None = None,
+    checkpointer: Any | None = None,
+) -> dict:
+    model = model or get_default_model()
+    graph = get_compiled_graph(model=model, checkpointer=checkpointer)
+    run_config = _run_config(thread_id, telegram_user_id)
+    initial, baseline, condensed = _initial_run_state(graph, run_config, query, telegram_user_id)
 
     # At most 2 attempts per model: one graph-level retry, only for transient
     # LLM errors. If fallback models are configured (AFRIKIA_FALLBACK_MODELS)
@@ -732,7 +771,7 @@ def run_agent(
             try:
                 result = g.invoke(initial, config=run_config)
                 if result.get("clarification"):
-                    _persist_clarification(result["clarification"])
+                    _persist_clarification_turn(g, run_config, condensed, query, result["clarification"])
                     # Clarification travels via result["clarification"], not _fresh_reply.
                     result["_fresh_reply"] = None
                     return result
@@ -751,15 +790,10 @@ def run_agent(
                     logger.warning("Run produced no usable reply (model junk); re-rolling once.")
                     time.sleep(1.0)
                     continue
-                # Success: store only [user, final_ai, ...], last 10
-                new_condensed = _condense_to_user_final_pairs(result.get("messages") or [])
-                try:
-                    g.update_state(run_config, {"messages": new_condensed})
-                except Exception as upd_err:
-                    logger.warning("Could not update state with condensed messages: %s", upd_err)
+                _persist_success(g, run_config, result.get("messages") or [])
                 return result
             except Exception as e:
-                _revert_messages()
+                _revert_run_messages(g, run_config, condensed)
                 if "recursion" in str(e).lower() or "GraphRecursionError" in type(e).__name__:
                     logger.warning("Graph hit recursion limit, returning partial result: %s", e)
                     try:
@@ -808,3 +842,138 @@ def run_agent(
                     raise
                 logger.warning("Fallback model %s also failed: %s", fb_model, fb_err)
         raise last_err
+
+
+# --- Streaming variant (SSE) -------------------------------------------------
+
+# Node -> live status label shown to the user. "updates" stream events fire
+# AFTER a node completes, so a node's status is announced when the PREVIOUS
+# node hands over (see _status_events_for_update).
+_NODE_STATUS_LABELS = {
+    "nlu": "Compréhension de la question…",
+    "supervisor": "Choix de l'agent…",
+    "scraper": "Récupération des données de marché…",
+    "analytics": "Analyse des données…",
+    "timeseries": "Maintenance des séries temporelles…",
+    "charts": "Génération du graphique…",
+    "news": "Recherche des actualités…",
+    "portfolio": "Consultation du portefeuille…",
+    "prediction": "Analyse des tendances…",
+    "sgi": "Recherche des courtiers…",
+    "company_details": "Consultation de la fiche société…",
+    "advisor": "Élaboration du conseil…",
+    "general": "Rédaction de la réponse…",
+    "multi_worker": "Analyse en cours…",
+}
+
+# Tokens from these nodes are internal (JSON routing / one-label output) and
+# are never forwarded to clients.
+_STREAM_SKIP_NODES = {"nlu", "supervisor"}
+
+
+def _status_events_for_update(node_name: str, update: Any) -> list[dict]:
+    """Announce what runs NEXT when `node_name` completes (an update describes
+    finished work; the user needs to know what is happening now)."""
+    if node_name == "nlu":
+        if isinstance(update, dict) and update.get("clarification"):
+            return []  # the run ends with the clarification question
+        return [{"type": "status", "node": "supervisor", "label": _NODE_STATUS_LABELS["supervisor"]}]
+    if node_name == "supervisor" and isinstance(update, dict):
+        if update.get("multi_workers"):
+            return [{"type": "status", "node": "multi_worker", "label": _NODE_STATUS_LABELS["multi_worker"]}]
+        next_ = update.get("next")
+        label = _NODE_STATUS_LABELS.get(next_ or "")
+        if label:
+            return [{"type": "status", "node": next_, "label": label}]
+    return []
+
+
+def _outer_node_of(ns: Any, metadata: Any) -> str:
+    """Attribute a streamed token to its OUTER graph node (worker ReAct agents
+    run as subgraphs: namespace segments look like 'analytics:<task_id>')."""
+    for seg in ns or ():
+        name = str(seg).split(":")[0].strip()
+        if name:
+            return name
+    return str((metadata or {}).get("langgraph_node") or "")
+
+
+def _chunk_text(chunk: AIMessageChunk) -> str:
+    content = chunk.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") in (None, "text")
+        )
+    return ""
+
+
+def run_agent_stream(
+    query: str,
+    model: str | None = None,
+    thread_id: str | None = None,
+    telegram_user_id: int | None = None,
+    checkpointer: Any | None = None,
+):
+    """Streaming variant of run_agent. Yields event dicts as the run progresses:
+
+    - {"type": "status", "node": ..., "label": ...} — which agent is working
+    - {"type": "thinking", "node": ..., "delta": ...} — reasoning deltas from
+      worker agents (progress display only; never persisted)
+    - {"type": "token", "node": ..., "delta": ...} — answer token deltas
+    - {"type": "final", "result": ...} — run_agent-shaped result on success
+    - {"type": "error", "exc": ...} — failure (caller maps to user-facing text)
+
+    Unlike run_agent there is no re-roll/fallback here: tokens already sent to
+    the client cannot be unsent, so a mid-run failure surfaces as an error
+    event instead of a transparent retry.
+    """
+    model = model or get_default_model()
+    graph = get_compiled_graph(model=model, checkpointer=checkpointer)
+    run_config = _run_config(thread_id, telegram_user_id)
+    initial, baseline, condensed = _initial_run_state(graph, run_config, query, telegram_user_id)
+
+    yield {"type": "status", "node": "nlu", "label": _NODE_STATUS_LABELS["nlu"]}
+    try:
+        # subgraphs=True: worker agents are ReAct subgraphs invoked inside the
+        # worker nodes — without it their LLM tokens never reach the stream
+        # (events then arrive as (namespace, mode, payload) triples).
+        for ns, mode, payload in graph.stream(
+            initial,
+            config=run_config,
+            stream_mode=["messages", "updates"],
+            subgraphs=True,
+        ):
+            if mode == "updates":
+                if ns:
+                    continue  # inner ReAct steps are not user-facing
+                for node_name, update in (payload or {}).items():
+                    yield from _status_events_for_update(node_name, update)
+                continue
+            # "messages" mode: (chunk, metadata) per LLM token.
+            chunk, metadata = payload
+            node = _outer_node_of(ns, metadata)
+            if node in _STREAM_SKIP_NODES or not isinstance(chunk, AIMessageChunk):
+                continue
+            reasoning = (chunk.additional_kwargs or {}).get("reasoning_content")
+            if reasoning:
+                yield {"type": "thinking", "node": node, "delta": reasoning}
+            text = _chunk_text(chunk)
+            if text:
+                yield {"type": "token", "node": node, "delta": text}
+
+        result = dict(graph.get_state(run_config).values or {})
+        if result.get("clarification"):
+            _persist_clarification_turn(graph, run_config, condensed, query, result["clarification"])
+            # Clarification travels via result["clarification"], not _fresh_reply.
+            result["_fresh_reply"] = None
+        else:
+            result["_fresh_reply"] = _extract_fresh_reply(result.get("messages") or [], baseline)
+            _persist_success(graph, run_config, result.get("messages") or [])
+        yield {"type": "final", "result": result}
+    except Exception as e:
+        _revert_run_messages(graph, run_config, condensed)
+        yield {"type": "error", "exc": e}

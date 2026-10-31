@@ -1,3 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:dio/dio.dart';
+
 import '../../core/api_client.dart';
 import '../../core/config.dart';
 import '../../core/json_utils.dart';
@@ -21,6 +26,52 @@ class ChatRepository {
       timeout: chatTimeout,
     );
     return ChatResponse.fromJson(asMap(response.data));
+  }
+
+  /// Version SSE de [send] : événements `status` / `thinking` / `token` en
+  /// direct, puis un événement `final` avec la réponse canonique. Lève une
+  /// exception si la connexion échoue avant le premier événement (l'appelant
+  /// retombe alors sur [send]).
+  Stream<ChatStreamEvent> sendStream(String query, {String? threadId}) async* {
+    final response = await _api.dio.post<ResponseBody>(
+      '${AppConfig.apiPrefix}/chat/stream',
+      data: <String, dynamic>{
+        'query': query,
+        'thread_id': ?threadId,
+      },
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: <String, dynamic>{'Accept': 'text/event-stream'},
+        receiveTimeout: chatTimeout,
+        sendTimeout: chatTimeout,
+      ),
+    );
+    final body = response.data;
+    if (body == null) return;
+
+    String buffer = '';
+    await for (final chunk
+        in body.stream.cast<List<int>>().transform(utf8.decoder)) {
+      buffer += chunk;
+      // Les événements SSE sont séparés par une ligne vide.
+      int sep;
+      while ((sep = buffer.indexOf('\n\n')) != -1) {
+        final rawEvent = buffer.substring(0, sep);
+        buffer = buffer.substring(sep + 2);
+        final dataLines = <String>[];
+        for (final line in rawEvent.split('\n')) {
+          if (line.startsWith('data:')) {
+            dataLines.add(line.substring(5).trimLeft());
+          }
+        }
+        if (dataLines.isEmpty) continue; // commentaire keepalive
+        try {
+          yield ChatStreamEvent.fromJson(asMap(jsonDecode(dataLines.join('\n'))));
+        } catch (_) {
+          // Événement mal formé : on l'ignore plutôt que casser le flux.
+        }
+      }
+    }
   }
 
   Future<List<Conversation>> getConversations() async {

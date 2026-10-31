@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from langgraph.prebuilt import create_react_agent
 
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.agents.utils import get_time_prefix
 from app.tools.portfolio_tools import PORTFOLIO_TOOLS
 
@@ -23,5 +23,5 @@ You are managing the account of the verified chat user (id {telegram_id}). The u
 
 
 def create_portfolio_agent(model: str | None = None):
-    llm = get_llm(model=model)
+    llm = get_agent_llm("portfolio", model=model)
     return create_react_agent(llm, PORTFOLIO_TOOLS)

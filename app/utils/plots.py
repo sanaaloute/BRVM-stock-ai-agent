@@ -12,7 +12,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
-from app.utils._data import load_series
+from app.utils._data import coerce_day, load_series
 
 ChartType = Literal["line", "area"]
 
@@ -39,19 +39,22 @@ def plot_timeseries(
     Returns {"image_path": path, "symbol", "start_date", "end_date", "points_count", "error": optional}.
     """
     symbol = (symbol or "").strip().upper()
-    start = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date)[:10])
-    end = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date)[:10])
+    start = coerce_day(start_date)
+    end = coerce_day(end_date)
 
     rows = load_series(symbol, start_date=start, end_date=end, fetch_if_missing=fetch_if_missing)
     if not rows:
         return {
             "symbol": symbol,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
+            "start_date": start.isoformat() if start else None,
+            "end_date": end.isoformat() if end else None,
             "image_path": None,
             "points_count": 0,
             "error": "Aucune donnée pour cette période.",
         }
+    # No explicit bound -> span of the data actually plotted.
+    span_start = start or rows[0]["date"]
+    span_end = end or rows[-1]["date"]
 
     dates = [r["date"] for r in rows]
     prices = np.array([r["price"] for r in rows], dtype=float)
@@ -87,7 +90,7 @@ def plot_timeseries(
     # Labels and title
     ax.set_xlabel("Date", fontsize=11, color="#374151")
     ax.set_ylabel("Price (F CFA)", fontsize=11, color="#374151")
-    ax.set_title(f"{symbol} — {start} to {end}", fontsize=14, fontweight=600, color="#111827", pad=12)
+    ax.set_title(f"{symbol} — {span_start} to {span_end}", fontsize=14, fontweight=600, color="#111827", pad=12)
 
     # Tidy spines
     for spine in ax.spines.values():
@@ -113,8 +116,8 @@ def plot_timeseries(
 
     return {
         "symbol": symbol,
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
+        "start_date": span_start.isoformat(),
+        "end_date": span_end.isoformat(),
         "image_path": path,
         "points_count": len(rows),
         "error": None,
@@ -134,8 +137,8 @@ def plot_timeseries_multi(
     save to a temp PNG. Symbols without data are skipped and reported.
     Returns {"image_path", "symbols", "missing_symbols", "start_date", "end_date", "points_count", "error"}.
     """
-    start = start_date if isinstance(start_date, date) else date.fromisoformat(str(start_date)[:10])
-    end = end_date if isinstance(end_date, date) else date.fromisoformat(str(end_date)[:10])
+    start = coerce_day(start_date)
+    end = coerce_day(end_date)
 
     series: dict[str, list] = {}
     missing: list[str] = []
@@ -153,12 +156,15 @@ def plot_timeseries_multi(
         return {
             "symbols": [],
             "missing_symbols": missing,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
+            "start_date": start.isoformat() if start else None,
+            "end_date": end.isoformat() if end else None,
             "image_path": None,
             "points_count": 0,
             "error": "Aucune donnée pour cette période.",
         }
+    # No explicit bound -> span of the data actually plotted.
+    span_start = start or min(rows[0]["date"] for rows in series.values())
+    span_end = end or max(rows[-1]["date"] for rows in series.values())
 
     fig, ax = plt.subplots(figsize=(11, 6), facecolor=BG_COLOR)
     ax.set_facecolor(BG_COLOR)
@@ -193,7 +199,7 @@ def plot_timeseries_multi(
     ax.set_xlabel("Date", fontsize=11, color="#374151")
     ax.set_ylabel("Price (F CFA)", fontsize=11, color="#374151")
     title = " vs ".join(series.keys())
-    ax.set_title(f"{title} — {start} to {end}", fontsize=14, fontweight=600, color="#111827", pad=12)
+    ax.set_title(f"{title} — {span_start} to {span_end}", fontsize=14, fontweight=600, color="#111827", pad=12)
 
     # Tidy spines
     for spine in ax.spines.values():
@@ -223,8 +229,8 @@ def plot_timeseries_multi(
     return {
         "symbols": list(series.keys()),
         "missing_symbols": missing,
-        "start_date": start.isoformat(),
-        "end_date": end.isoformat(),
+        "start_date": span_start.isoformat(),
+        "end_date": span_end.isoformat(),
         "image_path": path,
         "points_count": points_count,
         "error": error,

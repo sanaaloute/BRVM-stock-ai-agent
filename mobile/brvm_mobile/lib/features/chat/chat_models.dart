@@ -39,11 +39,13 @@ class ChatResponse {
 
   bool get isError => error != null && error!.isNotEmpty;
 
-  /// Toutes les images de la réponse (champ unique + champ liste).
-  List<String> get imagesBase64 => <String>[
-        ?imageBase64,
-        ...rawImagesBase64,
-      ];
+  /// Toutes les images de la réponse. Le champ liste prime : le serveur y
+  /// met TOUTES les images et duplique la première dans `image_base64` pour
+  /// les vieux clients — fusionner les deux afficherait la même image deux
+  /// fois. Le champ unique ne sert que de repli (anciennes réponses).
+  List<String> get imagesBase64 => rawImagesBase64.isNotEmpty
+      ? rawImagesBase64
+      : <String>[?imageBase64];
 
   /// Texte à afficher (les clarifications arrivent aussi dans `reply`).
   String? get displayText => reply;
@@ -117,13 +119,99 @@ class ChatMessage {
     required this.fromUser,
     this.imagesBase64 = const <String>[],
     this.caption,
+    this.thinking,
+    this.streaming = false,
     this.createdAt,
   });
+
+  ChatMessage copyWith({
+    String? text,
+    String? thinking,
+    bool? streaming,
+    List<String>? imagesBase64,
+    String? caption,
+  }) =>
+      ChatMessage(
+        id: id,
+        text: text ?? this.text,
+        fromUser: fromUser,
+        imagesBase64: imagesBase64 ?? this.imagesBase64,
+        caption: caption ?? this.caption,
+        thinking: thinking ?? this.thinking,
+        streaming: streaming ?? this.streaming,
+        createdAt: createdAt,
+      );
 
   final String id;
   final String text;
   final bool fromUser;
   final List<String> imagesBase64;
   final String? caption;
+
+  /// Raisonnement du modèle (événements `thinking` du flux SSE) : affiché
+  /// replié dans la bulle, jamais mélangé à la réponse finale.
+  final String? thinking;
+
+  /// Vrai tant que la réponse est en cours de streaming (bulle progressive).
+  final bool streaming;
+
   final DateTime? createdAt;
+}
+
+/// Types d'événements du flux SSE (POST /mobile/v1/chat/stream).
+enum ChatStreamEventType { status, thinking, token, finalPayload, error }
+
+/// Un événement du flux SSE de chat :
+/// - status : quel agent travaille ([label] en français) ;
+/// - thinking : fragment de raisonnement (à afficher replié) ;
+/// - token : fragment de la réponse ;
+/// - finalPayload : réponse canonique complète (remplace le texte progressif) ;
+/// - error : message d'erreur prêt à afficher.
+class ChatStreamEvent {
+  const ChatStreamEvent._(
+    this.type, {
+    this.delta,
+    this.label,
+    this.response,
+    this.error,
+  });
+
+  factory ChatStreamEvent.fromJson(Map<String, dynamic> json) {
+    // Les deltas sont pris BRUTS (pas de asString : les espaces et sauts de
+    // ligne portent le texte streamé, il ne faut rien rogner).
+    final delta = json['delta'];
+    switch ((asString(json['type']) ?? '').toLowerCase()) {
+      case 'status':
+        return ChatStreamEvent._(
+          ChatStreamEventType.status,
+          label: asString(json['label']),
+        );
+      case 'thinking':
+        return ChatStreamEvent._(
+          ChatStreamEventType.thinking,
+          delta: delta is String ? delta : null,
+        );
+      case 'token':
+        return ChatStreamEvent._(
+          ChatStreamEventType.token,
+          delta: delta is String ? delta : null,
+        );
+      case 'final':
+        return ChatStreamEvent._(
+          ChatStreamEventType.finalPayload,
+          response: ChatResponse.fromJson(asMap(json['payload'])),
+        );
+      default:
+        return ChatStreamEvent._(
+          ChatStreamEventType.error,
+          error: asString(json['error']) ?? 'Une erreur est survenue.',
+        );
+    }
+  }
+
+  final ChatStreamEventType type;
+  final String? delta;
+  final String? label;
+  final ChatResponse? response;
+  final String? error;
 }

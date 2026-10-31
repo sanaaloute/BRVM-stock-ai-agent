@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -791,6 +791,36 @@ async def mobile_chat(body: MobileChatBody, user: dict = Depends(require_app_use
         payload["quota_remaining"] = max(0, config.DAILY_FREE_QUOTA - user_db.get_daily_usage(user_key(user)))
         payload["thread_id"] = thread_id
     return payload
+
+
+@router.post("/chat/stream")
+async def mobile_chat_stream(body: MobileChatBody, user: dict = Depends(require_app_user)) -> StreamingResponse:
+    """SSE variant of /mobile/v1/chat: streams `status` (which agent is
+    working), `thinking` (model reasoning, render collapsed) and `token`
+    (answer) events, then a `final` event with the same payload as /chat
+    (plus quota_remaining and thread_id), or an `error` event."""
+    from app.api.chat import ChatRequest, _sse_format, _SSE_HEADERS, stream_chat_events
+
+    thread_id = body.thread_id or f"app:{user['id']}"
+
+    def add_mobile_extras(payload: dict) -> None:
+        payload["quota_remaining"] = max(
+            0, config.DAILY_FREE_QUOTA - user_db.get_daily_usage(user_key(user))
+        )
+        payload["thread_id"] = thread_id
+
+    req = ChatRequest(
+        query=body.query,
+        thread_id=thread_id,
+        telegram_user_id=_principal(user),  # agent tools (portfolio etc.) key on this
+        user_id=user_key(user),             # rate limit / quota key
+    )
+
+    async def gen():
+        async for event in stream_chat_events(req, final_hook=add_mobile_extras):
+            yield ": keepalive\n\n" if event is None else _sse_format(event)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 # --- Chat suggestions (fresh-conversation hints) --------------------------------

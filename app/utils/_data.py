@@ -38,6 +38,22 @@ def _get_refresh_lock(key: str) -> threading.Lock:
             _refresh_locks[key] = lock
         return lock
 
+
+def coerce_day(value: date | str | None) -> date | None:
+    """Coerce an LLM-supplied date argument to a date or None.
+
+    Models sometimes pass the string "None"/"null" (or a blank) for optional
+    dates — those mean "no bound" (full range / current data), not a parse
+    error. Genuine garbage still raises ValueError.
+    """
+    if value is None or isinstance(value, date):
+        return value
+    raw = str(value).strip()
+    if raw.lower() in ("", "none", "null"):
+        return None
+    return date.fromisoformat(raw[:10])
+
+
 _FRENCH_MONTHS = {
     "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5,
     "juin": 6, "juillet": 7, "août": 8, "aout": 8, "septembre": 9, "octobre": 10,

@@ -34,6 +34,7 @@ class ChatState {
     this.isSending = false,
     this.isLoadingHistory = false,
     this.error,
+    this.status,
   });
 
   final String? threadId;
@@ -42,12 +43,18 @@ class ChatState {
   final bool isLoadingHistory;
   final String? error;
 
+  /// Agent en cours côté serveur (événements `status` du flux SSE, libellé
+  /// français prêt à afficher). Null hors streaming.
+  final String? status;
+
   ChatState copyWith({
     String? threadId,
     List<ChatMessage>? messages,
     bool? isSending,
     bool? isLoadingHistory,
     String? error,
+    String? status,
+    bool clearStatus = false,
   }) =>
       ChatState(
         threadId: threadId ?? this.threadId,
@@ -55,6 +62,7 @@ class ChatState {
         isSending: isSending ?? this.isSending,
         isLoadingHistory: isLoadingHistory ?? this.isLoadingHistory,
         error: error,
+        status: clearStatus ? null : (status ?? this.status),
       );
 }
 
@@ -154,21 +162,88 @@ class ChatNotifier extends StateNotifier<ChatState> {
       fromUser: true,
       createdAt: DateTime.now(),
     );
+    // Bulle d'attente progressive : pensées + réponse s'y affichent en direct.
+    final placeholder = ChatMessage(
+      id: _nextId(),
+      text: '',
+      fromUser: false,
+      streaming: true,
+      createdAt: DateTime.now(),
+    );
     state = state.copyWith(
-      messages: <ChatMessage>[...state.messages, userMessage],
+      messages: <ChatMessage>[...state.messages, userMessage, placeholder],
       isSending: true,
       error: null,
+      clearStatus: true,
     );
 
+    final repo = _ref.read(chatRepositoryProvider);
+    // La requête n'est réellement consommée côté serveur qu'au premier
+    // événement : avant ça, une erreur (404 vieux serveur, réseau) retombe
+    // sans risque sur le POST classique.
+    var gotEvent = false;
     try {
-      final response = await _ref
-          .read(chatRepositoryProvider)
-          .send(trimmed, threadId: state.threadId);
+      await for (final event
+          in repo.sendStream(trimmed, threadId: state.threadId)) {
+        gotEvent = true;
+        switch (event.type) {
+          case ChatStreamEventType.status:
+            state = state.copyWith(status: event.label);
+          case ChatStreamEventType.thinking:
+            _growPlaceholder(placeholder.id, thinkingDelta: event.delta ?? '');
+          case ChatStreamEventType.token:
+            _growPlaceholder(placeholder.id, textDelta: event.delta ?? '');
+          case ChatStreamEventType.finalPayload:
+            _finishStream(placeholder.id, event.response!);
+            // La nouvelle conversation apparaît dans la liste.
+            _ref.invalidate(conversationsProvider);
+            return;
+          case ChatStreamEventType.error:
+            _failStream(
+              placeholder.id,
+              event.error ?? 'Une erreur est survenue.',
+            );
+            return;
+        }
+      }
+      // Flux terminé sans événement `final`.
+      if (!gotEvent) {
+        await _sendClassic(repo, trimmed, placeholderId: placeholder.id);
+      } else {
+        _failStream(
+          placeholder.id,
+          'Erreur réseau. Vérifiez votre connexion et réessayez.',
+        );
+      }
+    } catch (_) {
+      if (!gotEvent) {
+        await _sendClassic(repo, trimmed, placeholderId: placeholder.id);
+      } else {
+        _failStream(
+          placeholder.id,
+          'Erreur réseau. Vérifiez votre connexion et réessayez.',
+        );
+      }
+    }
+  }
+
+  /// Chemin historique (POST JSON simple) : secours quand le serveur ne
+  /// connaît pas /chat/stream ou que la connexion SSE échoue avant le
+  /// premier événement.
+  Future<void> _sendClassic(
+    ChatRepository repo,
+    String trimmed, {
+    required String placeholderId,
+  }) async {
+    _dropPlaceholder(placeholderId);
+    try {
+      final response = await repo.send(trimmed, threadId: state.threadId);
 
       if (response.isError) {
         state = state.copyWith(
           isSending: false,
           error: response.error ?? 'Une erreur est survenue.',
+          clearStatus: true,
         );
         return;
       }
@@ -185,6 +260,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         messages: <ChatMessage>[...state.messages, aiMessage],
         isSending: false,
         threadId: response.threadId ?? state.threadId,
+        clearStatus: true,
       );
       // La nouvelle conversation apparaît dans la liste.
       _ref.invalidate(conversationsProvider);
@@ -192,7 +268,61 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = state.copyWith(
         isSending: false,
         error: 'Erreur réseau. Vérifiez votre connexion et réessayez.',
+        clearStatus: true,
       );
     }
+  }
+
+  void _growPlaceholder(String id, {String? textDelta, String? thinkingDelta}) {
+    _updatePlaceholder(
+      id,
+      (m) => m.copyWith(
+        text: m.text + (textDelta ?? ''),
+        thinking: (m.thinking ?? '') + (thinkingDelta ?? ''),
+      ),
+    );
+  }
+
+  /// Remplace la bulle progressive par la réponse canonique (le texte
+  /// streamé était une approximation — le payload final fait foi). La
+  /// réflexion accumulée reste visible, repliée.
+  void _finishStream(String placeholderId, ChatResponse response) {
+    _updatePlaceholder(
+      placeholderId,
+      (m) => m.copyWith(
+        text: response.displayText ?? '',
+        imagesBase64: response.imagesBase64,
+        caption: response.imageCaption,
+        streaming: false,
+      ),
+    );
+    state = state.copyWith(
+      isSending: false,
+      threadId: response.threadId ?? state.threadId,
+      clearStatus: true,
+    );
+  }
+
+  void _failStream(String placeholderId, String message) {
+    _dropPlaceholder(placeholderId);
+    state = state.copyWith(
+      isSending: false,
+      error: message,
+      clearStatus: true,
+    );
+  }
+
+  void _dropPlaceholder(String id) {
+    state = state.copyWith(
+      messages: state.messages.where((m) => m.id != id).toList(),
+    );
+  }
+
+  void _updatePlaceholder(String id, ChatMessage Function(ChatMessage) update) {
+    final messages = List<ChatMessage>.of(state.messages);
+    final index = messages.indexWhere((m) => m.id == id);
+    if (index == -1) return;
+    messages[index] = update(messages[index]);
+    state = state.copyWith(messages: messages);
   }
 }

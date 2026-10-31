@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 from app.agents.state import AgentState
 from app.agents.utils import get_time_prefix
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.utils.brvm_basics import get_brvm_basics
 
 
@@ -47,7 +47,7 @@ def create_general_node(model: str):
             m for m in (state.get("messages") or [])
             if not (isinstance(m, AIMessage) and "[NLU]" in str(getattr(m, "content", "") or ""))
         ]
-        llm = get_llm(model=model)
+        llm = get_agent_llm("general", model=model)
         reply = llm.invoke([SystemMessage(content=_general_system())] + messages)
         content = reply.content if hasattr(reply, "content") else str(reply)
         out_messages = list(state.get("messages") or []) + [AIMessage(content=content)]

@@ -59,6 +59,16 @@ void main() {
       expect(response.imagesBase64, <String>['aGVsbG8=']);
     });
 
+    test('image_base64 + images_base64 ensemble : pas de doublon', () {
+      // Le serveur renvoie toujours les deux champs (image_base64 = première
+      // image de images_base64) : la fusion ne doit pas répéter l'image.
+      final response = ChatResponse.fromJson(<String, dynamic>{
+        'image_base64': 'aW1nMQ==',
+        'images_base64': <String>['aW1nMQ=='],
+      });
+      expect(response.imagesBase64, <String>['aW1nMQ==']);
+    });
+
     test('clarification : drapeau booléen, texte dans reply', () {
       // Contrat backend (app/api/chat.py) : le texte de la clarification
       // voyage dans `reply`, `clarification` est un booléen.

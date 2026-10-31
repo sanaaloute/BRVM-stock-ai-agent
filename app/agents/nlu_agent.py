@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 
 from app.utils.brvm_companies import normalize_entities
 
@@ -272,7 +272,7 @@ def run_nlu_node(state: dict, model: str) -> dict:
             "clarification": None,
         }
 
-    llm = get_llm(model=router_model, temperature=0.0)
+    llm = get_agent_llm("nlu", model=router_model, temperature=0.0)
 
     system = _nlu_system_prompt()
     # Give the NLU the recent conversation so it can resolve follow-ups

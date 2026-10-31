@@ -167,9 +167,17 @@ LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1").strip() or "1")
 
 # Reasoning ("thinking") mode for reasoning models like nemotron-3-nano: the
 # hidden chain-of-thought multiplies every call's latency (~5x measured) and is
-# not needed for routing/classification or short factual answers. Off by
-# default; set LLM_THINKING=1 to re-enable.
+# not needed for routing/classification or short factual answers. This is the
+# fallback default for agents without an explicit profile (see
+# AGENT_LLM_PROFILES in app/models/llm.py); per-agent overrides:
+# LLM_THINKING_<AGENT>=0/1 (e.g. LLM_THINKING_ADVISOR=1).
 LLM_THINKING = os.getenv("LLM_THINKING", "0").strip().lower() in ("1", "true", "yes", "on")
+
+# Default max_tokens for chat calls without an agent profile. Reasoning models
+# think up to 1024 tokens (server-side cap) before answering, so the floor is
+# kept well above 2000 to always leave room for the final answer. Per-agent
+# overrides: LLM_MAX_TOKENS_<AGENT> (e.g. LLM_MAX_TOKENS_ADVISOR=8192).
+LLM_MAX_TOKENS = max(2048, int(os.getenv("LLM_MAX_TOKENS", "4096").strip() or "4096"))
 
 # Optional Ollama Cloud key — scraper web_fetch/web_search fallback ONLY
 # (app/utils/ollama_web.py, used when Tavily fails). The chat LLM never uses Ollama.

@@ -10,9 +10,66 @@ import argparse
 import sys
 
 import config
-from app.agents import run_agent
+from app.agents import run_agent, run_agent_stream
 from app.agents.graph import CHAT_MEMORY_DB
 from app.models.llm import get_default_model
+
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+
+
+def _run_stream(args, text: str, model: str) -> int:
+    """Streaming run: statuses on stderr, thinking dimmed, tokens inline."""
+    kwargs = {}
+    if not args.no_memory:
+        CHAT_MEMORY_DB.parent.mkdir(parents=True, exist_ok=True)
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        checkpointer_cm = SqliteSaver.from_conn_string(str(CHAT_MEMORY_DB))
+        kwargs["checkpointer"] = checkpointer_cm.__enter__()
+    else:
+        checkpointer_cm = None
+
+    def go() -> int:
+        in_thinking = False
+        streamed_answer = False
+        final = None
+        for ev in run_agent_stream(text, model=model, thread_id="cli", **kwargs):
+            kind = ev.get("type")
+            if kind == "status":
+                print(f"\n[status] {ev['label']}", file=sys.stderr, flush=True)
+            elif kind == "thinking":
+                if not in_thinking:
+                    print(f"\n{_DIM}[thinking] ", end="", flush=True)
+                    in_thinking = True
+                print(ev["delta"], end="", flush=True)
+            elif kind == "token":
+                if in_thinking:
+                    print(f"{_RESET}\n\n[assistant] ", end="", flush=True)
+                    in_thinking = False
+                streamed_answer = True
+                print(ev["delta"], end="", flush=True)
+            elif kind == "final":
+                final = ev.get("result") or {}
+            elif kind == "error":
+                exc = ev.get("exc")
+                print(f"{_RESET}\nError: {exc}", file=sys.stderr, flush=True)
+                return 1
+        if in_thinking:
+            print(_RESET, end="", flush=True)
+        if final is not None:
+            print()  # newline after streamed tokens
+            reply = final.get("_fresh_reply") or final.get("clarification")
+            if not streamed_answer and reply:
+                print(f"\n[assistant]\n{reply}")
+            for p in final.get("image_paths") or []:
+                print(f"[chart] {p}")
+        return 0
+
+    try:
+        return go()
+    finally:
+        if checkpointer_cm is not None:
+            checkpointer_cm.__exit__(None, None, None)
 
 
 def main() -> int:
@@ -20,6 +77,7 @@ def main() -> int:
     parser.add_argument("query", nargs="?", default="", help="User question (or read from stdin).")
     parser.add_argument("--model", default=None, help="Model override (default: from LLM_PROVIDER/LLM_MODEL).")
     parser.add_argument("--no-memory", action="store_true", help="Disable persistent chat memory for this run.")
+    parser.add_argument("--stream", action="store_true", help="Stream agent status, thinking and answer tokens live.")
     args = parser.parse_args()
 
     text = (args.query or "").strip()
@@ -35,6 +93,9 @@ def main() -> int:
         return 1
 
     model = args.model or get_default_model()
+    if args.stream:
+        return _run_stream(args, text, model)
+
     print("Running agent...")
     if args.no_memory:
         result = run_agent(text, model=model, thread_id="cli")

@@ -4,7 +4,7 @@ from __future__ import annotations
 from langgraph.prebuilt import create_react_agent
 
 from app.agents.utils import get_time_prefix
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.tools.prediction_tools import (
     get_all_trends_tool,
     get_stock_prediction_detail_tool,
@@ -52,5 +52,5 @@ def get_prediction_agent_system() -> str:
 
 
 def create_prediction_agent(model: str | None = None):
-    llm = get_llm(model=model)
+    llm = get_agent_llm("prediction", model=model)
     return create_react_agent(llm, PREDICTION_TOOLS)

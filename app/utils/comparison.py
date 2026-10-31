@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from app.utils._data import fetch_palmares, load_price_on_or_before
+from app.utils._data import coerce_day, fetch_palmares, load_price_on_or_before
 from app.utils.stock_metrics import get_stock_metrics
 
 
@@ -47,8 +47,8 @@ def compare_stocks(
         "b_period_price": None,
     }
 
-    if period_price_date is not None:
-        d = period_price_date if isinstance(period_price_date, date) else date.fromisoformat(str(period_price_date)[:10])
+    d = coerce_day(period_price_date)
+    if d is not None:
         comparison["period_price_date"] = d.isoformat()
         # Exact-date lookup fails on weekends/holidays: use most recent trading day.
         ra = load_price_on_or_before(symbol_a, d)

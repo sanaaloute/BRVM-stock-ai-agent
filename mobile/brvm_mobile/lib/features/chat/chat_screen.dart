@@ -110,14 +110,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         controller: _scrollController,
                         padding: const EdgeInsets.all(12),
                         itemCount: chat.messages.length +
-                            (chat.isSending ? 1 : 0) +
+                            (chat.isSending && !_hasStreamingBubble(chat)
+                                ? 1
+                                : 0) +
                             (chat.error != null ? 1 : 0),
                         itemBuilder: (context, index) {
                           if (index < chat.messages.length) {
-                            return _MessageBubble(message: chat.messages[index]);
+                            final msg = chat.messages[index];
+                            // Bulle de streaming encore vide : l'indicateur
+                            // d'attente (statut live) tient lieu de contenu.
+                            if (msg.streaming &&
+                                msg.text.isEmpty &&
+                                (msg.thinking ?? '').isEmpty) {
+                              return _WaitingIndicator(status: chat.status);
+                            }
+                            return _MessageBubble(message: msg);
                           }
                           if (chat.isSending) {
-                            return const _WaitingIndicator();
+                            return _WaitingIndicator(status: chat.status);
                           }
                           return _ErrorBubble(message: chat.error!);
                         },
@@ -209,6 +219,11 @@ class _ChatHint extends ConsumerWidget {
   }
 }
 
+/// Vrai quand une bulle d'attente de streaming est dans la liste : la bulle
+/// elle-même affiche la progression, l'indicateur classique ne se double pas.
+bool _hasStreamingBubble(ChatState chat) =>
+    chat.messages.isNotEmpty && chat.messages.last.streaming;
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({required this.message});
 
@@ -257,10 +272,22 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            if ((message.thinking ?? '').isNotEmpty)
+              _ThinkingBlock(
+                text: message.thinking!,
+                streaming: message.streaming,
+                color: textColor,
+              ),
             if (message.text.isNotEmpty)
               message.fromUser
                   ? Text(message.text, style: TextStyle(color: textColor))
-                  : _AssistantMarkdown(text: message.text, color: textColor),
+                  : _AssistantMarkdown(
+                      // Curseur de frappe pendant le streaming.
+                      text: message.streaming
+                          ? '${message.text} ▍'
+                          : message.text,
+                      color: textColor,
+                    ),
             for (final image in images) ...<Widget>[
               const SizedBox(height: 8),
               ClipRRect(borderRadius: BorderRadius.circular(8), child: image),
@@ -276,6 +303,86 @@ class _MessageBubble extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Raisonnement du modèle (événements `thinking` du flux SSE). Pendant le
+/// streaming, la fin du fil de pensée défile en grisé italique ; une fois la
+/// réponse terminée, la réflexion complète se replie derrière un en-tête —
+/// le raisonnement brut n'envahit jamais la conversation.
+class _ThinkingBlock extends StatelessWidget {
+  const _ThinkingBlock({
+    required this.text,
+    required this.streaming,
+    required this.color,
+  });
+
+  final String text;
+  final bool streaming;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      fontStyle: FontStyle.italic,
+      color: color.withValues(alpha: 0.75),
+    );
+    final labelColor = color.withValues(alpha: 0.7);
+    final labelStyle = theme.textTheme.labelSmall?.copyWith(
+      color: labelColor,
+      fontWeight: FontWeight.w600,
+    );
+    if (streaming) {
+      const tail = 400;
+      final shown =
+          text.length > tail ? '…${text.substring(text.length - tail)}' : text;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(Icons.psychology_outlined, size: 14, color: labelColor),
+                const SizedBox(width: 4),
+                Text('Réflexion de l’assistant…', style: labelStyle),
+              ],
+            ),
+            const SizedBox(height: 2),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 110),
+              child: SingleChildScrollView(
+                reverse: true,
+                child: Text(shown, style: style),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Theme(
+      data: theme.copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        dense: true,
+        visualDensity: VisualDensity.compact,
+        title: Text(
+          'Voir la réflexion',
+          style: labelStyle?.copyWith(fontStyle: FontStyle.italic),
+        ),
+        iconColor: labelColor,
+        collapsedIconColor: labelColor,
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(text, style: style),
+          ),
+        ],
       ),
     );
   }
@@ -342,7 +449,11 @@ class _AssistantMarkdown extends StatelessWidget {
 /// compteur de secondes. Au-delà de ~45 s, les messages reconnaissent
 /// l'attente sans l'ancien libellé « cela peut prendre quelques minutes ».
 class _WaitingIndicator extends StatefulWidget {
-  const _WaitingIndicator();
+  const _WaitingIndicator({this.status});
+
+  /// Statut live du serveur (« Analyse des données… ») : remplace les
+  /// messages rotatifs tant qu'il est connu.
+  final String? status;
 
   @override
   State<_WaitingIndicator> createState() => _WaitingIndicatorState();
@@ -395,7 +506,7 @@ class _WaitingIndicatorState extends State<_WaitingIndicator>
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final messages = _elapsed >= 45 ? _patientMessages : _messages;
-    final message = messages[(_elapsed ~/ 3) % messages.length];
+    final message = widget.status ?? messages[(_elapsed ~/ 3) % messages.length];
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(

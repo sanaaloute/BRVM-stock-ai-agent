@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import create_react_agent
 
-from app.models.llm import get_llm
+from app.models.llm import get_agent_llm
 from app.agents.utils import get_time_prefix
 from app.tools.stock_tools import get_timeseries_tool, plot_company_chart_tool
 
@@ -102,5 +102,5 @@ def _extract_chart_caption_from_messages(messages: list) -> str | None:
 
 
 def create_charts_agent(model: str | None = None):
-    llm = get_llm(model=model)
+    llm = get_agent_llm("charts", model=model)
     return create_react_agent(llm, CHARTS_TOOLS)

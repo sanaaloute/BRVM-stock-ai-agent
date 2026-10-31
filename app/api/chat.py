@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import secrets
 import sqlite3
@@ -11,13 +12,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Callable
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
 import config
-from app.agents import run_agent
+from app.agents import run_agent, run_agent_stream
 from app.agents.graph import CHAT_MEMORY_DB
 from app.utils.redact import redact_for_chat
 from app.db import engine as db_engine
@@ -322,17 +325,89 @@ def _quota_active(user_key: str) -> bool:
     return config.DAILY_FREE_QUOTA > 0 and user_key not in config.QUOTA_EXEMPT_IDS
 
 
+def _resolve_user_key(req: ChatRequest) -> str:
+    if req.user_id:
+        return req.user_id
+    if req.telegram_user_id is not None:
+        return str(req.telegram_user_id)
+    return f"thread:{req.thread_id}"
+
+
+def _quota_reject(user_key: str) -> ChatError | None:
+    """Daily free quota: count the request once it has a worker slot, so
+    rate-limited/"busy" rejections never consume quota. Atomic
+    increment-then-check keeps concurrent requests from overshooting.
+    Returns the rejection error, or None when the request may proceed."""
+    if not _quota_active(user_key):
+        return None
+    used = increment_daily_usage(user_key)
+    if used > config.DAILY_FREE_QUOTA:
+        decrement_daily_usage(user_key)
+        logger.info("Daily quota exhausted: %s (limit %d)", user_key, config.DAILY_FREE_QUOTA)
+        return ChatError(
+            error=(
+                f"⏳ Vous avez atteint la limite de {config.DAILY_FREE_QUOTA} "
+                "requêtes gratuites par jour. Revenez demain pour continuer !"
+            )
+        )
+    return None
+
+
+def _refund_quota(user_key: str) -> None:
+    try:
+        decrement_daily_usage(user_key)  # refund: failed requests are free
+    except Exception:
+        logger.warning("Quota refund failed for %s", user_key, exc_info=True)
+
+
+def _build_response_from_result(result: dict) -> ChatResponse | ChatError:
+    """Turn a run_agent result into the sanitized API response (reply, AI
+    disclaimer footer, base64 charts). Shared by /chat and /chat/stream."""
+    clarification = result.get("clarification")
+    if clarification:
+        reply = redact_for_chat(clarification)
+        if _needs_footer(result, clarification=True):
+            reply += SOURCE_FOOTER
+        return ChatResponse(reply=reply, clarification=True)
+
+    raw_reply = result.get("_fresh_reply")
+    if raw_reply is None:
+        # This run produced no fresh AI reply (e.g. all workers failed).
+        # Never fall back to older checkpoint messages: that could serve a
+        # stale previous-turn answer (or raw ToolMessage JSON) as the reply.
+        logger.warning("No fresh reply produced (stream or sync run)")
+        return ChatError(error="Une erreur s'est produite. Veuillez réessayer.")
+    reply = redact_for_chat(raw_reply)
+    if _needs_footer(result, clarification=False):
+        reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
+
+    image_paths = result.get("image_paths") or []
+    if not image_paths and result.get("image_path"):
+        image_paths = [result["image_path"]]
+    images_base64: list[str] = []
+    for image_path in image_paths:
+        if not image_path or not Path(image_path).exists():
+            continue
+        try:
+            with open(image_path, "rb") as f:
+                images_base64.append(base64.b64encode(f.read()).decode("ascii"))
+        finally:
+            Path(image_path).unlink(missing_ok=True)
+
+    return ChatResponse(
+        reply=reply,
+        image_base64=images_base64[0] if images_base64 else None,
+        images_base64=images_base64 or None,
+        image_caption=result.get("image_caption") if images_base64 else None,
+    )
+
+
 def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
     """Sync chat pipeline: rate limit, quota, agent run, reply sanitization.
 
     Runs on _chat_executor (via run_chat) — never call from the event loop.
     """
-    if req.user_id:
-        user_key = req.user_id
-    elif req.telegram_user_id is not None:
-        user_key = str(req.telegram_user_id)
-    else:
-        user_key = f"thread:{req.thread_id}"
+    user_key = _resolve_user_key(req)
     if _rate_limited(user_key):
         logger.info("Rate limited: %s", user_key)
         return ChatError(error="Trop de requêtes. Patientez un instant et réessayez.")
@@ -345,21 +420,10 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
     counted = False
     try:
         touch_thread_activity(req.thread_id)
-        # Daily free quota: count the request once it has a worker slot, so
-        # rate-limited/"busy" rejections never consume quota. Atomic
-        # increment-then-check keeps concurrent requests from overshooting.
-        if _quota_active(user_key):
-            used = increment_daily_usage(user_key)
-            if used > config.DAILY_FREE_QUOTA:
-                decrement_daily_usage(user_key)
-                logger.info("Daily quota exhausted: %s (limit %d)", user_key, config.DAILY_FREE_QUOTA)
-                return ChatError(
-                    error=(
-                        f"⏳ Vous avez atteint la limite de {config.DAILY_FREE_QUOTA} "
-                        "requêtes gratuites par jour. Revenez demain pour continuer !"
-                    )
-                )
-            counted = True
+        rejected = _quota_reject(user_key)
+        if rejected is not None:
+            return rejected
+        counted = _quota_active(user_key)
         # One run at a time per conversation thread, inside the semaphore-
         # protected section (concurrent runs would corrupt the checkpoint).
         with _thread_lock(req.thread_id):
@@ -370,54 +434,148 @@ def _chat_impl(req: ChatRequest) -> ChatResponse | ChatError:
                 telegram_user_id=req.telegram_user_id,
                 checkpointer=_get_checkpointer(),
             )
-
-        clarification = result.get("clarification")
-        if clarification:
-            reply = redact_for_chat(clarification)
-            if _needs_footer(result, clarification=True):
-                reply += SOURCE_FOOTER
-            return ChatResponse(reply=reply, clarification=True)
-
-        raw_reply = result.get("_fresh_reply")
-        if raw_reply is None:
-            # This run produced no fresh AI reply (e.g. all workers failed).
-            # Never fall back to older checkpoint messages: that could serve a
-            # stale previous-turn answer (or raw ToolMessage JSON) as the reply.
-            logger.warning("No fresh reply produced for thread %s", req.thread_id)
-            return ChatError(error="Une erreur s'est produite. Veuillez réessayer.")
-        reply = redact_for_chat(raw_reply)
-        if _needs_footer(result, clarification=False):
-            reply = (reply + SOURCE_FOOTER) if reply else SOURCE_FOOTER.strip()
-
-        image_paths = result.get("image_paths") or []
-        if not image_paths and result.get("image_path"):
-            image_paths = [result["image_path"]]
-        images_base64: list[str] = []
-        for image_path in image_paths:
-            if not image_path or not Path(image_path).exists():
-                continue
-            try:
-                with open(image_path, "rb") as f:
-                    images_base64.append(base64.b64encode(f.read()).decode("ascii"))
-            finally:
-                Path(image_path).unlink(missing_ok=True)
-
-        return ChatResponse(
-            reply=reply,
-            image_base64=images_base64[0] if images_base64 else None,
-            images_base64=images_base64 or None,
-            image_caption=result.get("image_caption") if images_base64 else None,
-        )
+        return _build_response_from_result(result)
     except Exception as e:
         if counted:
-            try:
-                decrement_daily_usage(user_key)  # refund: failed requests are free
-            except Exception:
-                logger.warning("Quota refund failed for %s", user_key, exc_info=True)
+            _refund_quota(user_key)
         logger.exception("Chat API error: %s", e)
         return ChatError(error=_user_friendly_error(e))
     finally:
         _agent_semaphore.release()
+
+
+# --- Streaming (SSE) ----------------------------------------------------------
+
+# No event for this long → send an SSE keepalive comment (tool calls such as
+# web scrapes can pause token flow for many seconds).
+_SSE_KEEPALIVE_SEC = 15.0
+
+
+def _chat_stream_impl(req: ChatRequest, emit: Callable[[dict], None]) -> None:
+    """Sync streaming pipeline: same guards as _chat_impl, then forwards
+    run_agent_stream events. Runs on _chat_executor — `emit` must be
+    thread-safe. Event shapes:
+      {"type": "status"|"thinking"|"token", ...}  (progress)
+      {"type": "final", "payload": <ChatResponse dict>}
+      {"type": "error", "error": <user-facing message>}
+    """
+    user_key = _resolve_user_key(req)
+    if _rate_limited(user_key):
+        logger.info("Rate limited: %s", user_key)
+        emit({"type": "error", "error": "Trop de requêtes. Patientez un instant et réessayez."})
+        return
+    acquired = _agent_semaphore.acquire(timeout=config.AGENT_QUEUE_TIMEOUT)
+    if not acquired:
+        logger.warning("Agent pool saturated; rejecting stream for thread %s", req.thread_id)
+        emit({"type": "error", "error": "L'assistant est très sollicité en ce moment. Réessayez dans un instant."})
+        return
+    counted = False
+    try:
+        touch_thread_activity(req.thread_id)
+        rejected = _quota_reject(user_key)
+        if rejected is not None:
+            emit({"type": "error", "error": rejected.error})
+            return
+        counted = _quota_active(user_key)
+        # One run at a time per conversation thread (see _chat_impl).
+        with _thread_lock(req.thread_id):
+            for event in run_agent_stream(
+                query=req.query,
+                model=get_default_model(),
+                thread_id=req.thread_id,
+                telegram_user_id=req.telegram_user_id,
+                checkpointer=_get_checkpointer(),
+            ):
+                kind = event.get("type")
+                if kind == "final":
+                    resp = _build_response_from_result(event.get("result") or {})
+                    if isinstance(resp, ChatError):
+                        emit({"type": "error", "error": resp.error})
+                    else:
+                        emit({"type": "final", "payload": resp.model_dump()})
+                elif kind == "error":
+                    exc = event.get("exc")
+                    if counted:
+                        _refund_quota(user_key)
+                        counted = False
+                    if isinstance(exc, Exception):
+                        logger.warning("Streamed run failed: %s", exc)
+                        emit({"type": "error", "error": _user_friendly_error(exc)})
+                    else:
+                        emit({"type": "error", "error": "Une erreur s'est produite. Veuillez réessayer."})
+                else:
+                    emit(event)
+    except Exception as e:
+        if counted:
+            _refund_quota(user_key)
+        logger.exception("Chat stream error: %s", e)
+        emit({"type": "error", "error": _user_friendly_error(e)})
+    finally:
+        _agent_semaphore.release()
+
+
+async def stream_chat_events(
+    req: ChatRequest,
+    final_hook: Callable[[dict], None] | None = None,
+):
+    """Async generator bridging the sync streaming pipeline to SSE handlers.
+    Yields event dicts; yields None when a keepalive should be sent.
+    `final_hook` may amend the final payload (e.g. mobile quota/thread_id)."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    sentinel = object()
+
+    def emit(event: dict) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    def produce() -> None:
+        try:
+            _chat_stream_impl(req, emit)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+
+    _chat_executor.submit(produce)
+    while True:
+        try:
+            event = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_SEC)
+        except asyncio.TimeoutError:
+            yield None  # keepalive
+            continue
+        if event is sentinel:
+            break
+        if event.get("type") == "final" and final_hook is not None:
+            try:
+                final_hook(event.get("payload") or {})
+            except Exception as e:
+                logger.warning("final_hook failed: %s", e)
+        yield event
+
+
+def _sse_format(event: dict) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    # Disable proxy buffering (nginx/Cloudflare) so tokens flush immediately.
+    "X-Accel-Buffering": "no",
+}
+
+
+@router.post("/chat/stream", dependencies=[Depends(verify_api_key)])
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """SSE variant of /chat: streams agent status, thinking (reasoning) and
+    answer tokens as `data:` events, then a `final` event carrying the same
+    payload as /chat. Reasoning traces travel as separate `thinking` events so
+    clients can render them collapsed — the answer itself is in `token`/`final`.
+    """
+
+    async def gen():
+        async for event in stream_chat_events(req):
+            yield ": keepalive\n\n" if event is None else _sse_format(event)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 async def run_chat(req: ChatRequest) -> ChatResponse | ChatError:

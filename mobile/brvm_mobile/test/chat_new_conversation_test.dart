@@ -25,6 +25,18 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
+  Stream<ChatStreamEvent> sendStream(String query, {String? threadId}) async* {
+    sentThreadIds.add(threadId);
+    yield ChatStreamEvent.fromJson(<String, dynamic>{
+      'type': 'final',
+      'payload': <String, dynamic>{
+        'reply': 'Réponse',
+        'thread_id': threadId ?? 'app:u1:serveur',
+      },
+    });
+  }
+
+  @override
   Future<List<Conversation>> getConversations() async => <Conversation>[
         for (final id in sentThreadIds.whereType<String>())
           Conversation(threadId: id, title: 'Conv $id', lastSeen: DateTime.now()),

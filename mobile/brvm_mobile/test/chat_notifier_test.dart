@@ -21,6 +21,18 @@ class _FakeChatRepository extends ChatRepository {
   }
 
   @override
+  Stream<ChatStreamEvent> sendStream(String query, {String? threadId}) async* {
+    sent.add((query: query, threadId: threadId));
+    yield ChatStreamEvent.fromJson(<String, dynamic>{
+      'type': 'final',
+      'payload': <String, dynamic>{
+        'reply': 'Réponse',
+        'thread_id': threadId ?? 'app:u1:serveur',
+      },
+    });
+  }
+
+  @override
   Future<List<HistoryMessage>> getMessages(String threadId) async => history;
 }
 

@@ -126,22 +126,24 @@ def test_router_model_is_used_for_nlu():
             from langchain_core.messages import AIMessage as _AM
             return _AM(content='{"intent": "general", "entities": {}, "suggested_worker": "general"}')
 
-    def _capture_get_llm(model=None, **k):
+    def _capture_get_agent_llm(agent=None, model=None, **k):
+        captured["agent"] = agent
         captured["model"] = model
         return _Capture()
 
-    real = nlu_mod.get_llm
+    real = nlu_mod.get_agent_llm
     saved_router = config.ROUTER_MODEL
-    nlu_mod.get_llm = _capture_get_llm
+    nlu_mod.get_agent_llm = _capture_get_agent_llm
     config.ROUTER_MODEL = "gemma4-e4b"
     try:
         nlu_mod.run_nlu_node({"messages": [HumanMessage(content="c est quoi la brvm?")]}, model="nemotron-3-nano")
         assert captured["model"] == "gemma4-e4b", captured
+        assert captured["agent"] == "nlu", captured
         config.ROUTER_MODEL = None  # empty -> primary model
         nlu_mod.run_nlu_node({"messages": [HumanMessage(content="c est quoi la brvm?")]}, model="nemotron-3-nano")
         assert captured["model"] == "nemotron-3-nano", captured
     finally:
-        nlu_mod.get_llm = real
+        nlu_mod.get_agent_llm = real
         config.ROUTER_MODEL = saved_router
 
 
@@ -155,15 +157,15 @@ def test_pure_greeting_short_circuits_the_classifier():
     for text in ["salut, quel est le cours de SNTS ?", "bonjour je veux investir", "ca va et toi et le cours NTLC"]:
         assert not nlu_mod._is_pure_greeting(text), text
 
-    def _exploding_get_llm(*a, **k):
+    def _exploding_get_agent_llm(*a, **k):
         raise AssertionError("greeting must not call the LLM")
 
-    real = nlu_mod.get_llm
-    nlu_mod.get_llm = _exploding_get_llm
+    real = nlu_mod.get_agent_llm
+    nlu_mod.get_agent_llm = _exploding_get_agent_llm
     try:
         out = nlu_mod.run_nlu_node({"messages": [HumanMessage(content="hi")]}, model="fake")
     finally:
-        nlu_mod.get_llm = real
+        nlu_mod.get_agent_llm = real
     assert out["clarification"] is None
     assert out["structured_data"]["suggested_worker"] == "general", out["structured_data"]
 
@@ -210,7 +212,7 @@ def _patch_llm(fake):
     for mod in (graph_mod, nlu_mod, general_mod, analytics_mod, scraper_mod, timeseries_mod,
                 charts_mod, news_mod, portfolio_mod, prediction_mod, sgi_mod,
                 company_details_mod):
-        mod.get_llm = lambda *a, **k: fake
+        mod.get_agent_llm = lambda *a, **k: fake
 
 
 def test_greeting_routes_to_general_responder():

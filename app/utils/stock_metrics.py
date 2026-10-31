@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from app.utils._data import fetch_palmares, load_price_on_or_before
+from app.utils._data import coerce_day, fetch_palmares, load_price_on_or_before
 from app.utils.brvm_companies import get_valid_symbols
 from app.utils.market_hours import expected_data_date, market_note
 
@@ -37,6 +37,9 @@ def get_stock_metrics(
         out["error"] = f"{symbol} n'est pas un symbole BRVM coté. Cet assistant ne couvre que la BRVM (Bourse Régionale des Valeurs Mobilières)."
         return out
 
+    # LLM tools may send the string "None"/"null" for at_time = current data.
+    at_time = coerce_day(at_time)
+
     if at_time is None:
         stocks = fetch_palmares(period=period, progression="tout")
         for s in stocks:
@@ -65,13 +68,8 @@ def get_stock_metrics(
         out["data_as_of"] = expected_data_date().isoformat()
         return out
 
-    # Historical: resolve date and look up in series
-    if isinstance(at_time, datetime):
-        d = at_time.date()
-    elif isinstance(at_time, str):
-        d = date.fromisoformat(at_time.strip()[:10])
-    else:
-        d = at_time
+    # Historical: coerce_day already handled strings; datetime keeps its date part.
+    d = at_time.date() if isinstance(at_time, datetime) else at_time
     out["at_time"] = d.isoformat()
     out["source"] = "timeseries"
 
