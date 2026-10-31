@@ -114,6 +114,18 @@ def _seed_all(user: dict) -> list[str]:
             purpose="login",
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
         ))
+        # Imported-document tables: both FK to users.telegram_id (and dividends
+        # to the import) — forgetting them in the purge is what broke account
+        # deletion on Postgres for users with imports.
+        imp = models.PortfolioImport(
+            telegram_id=pid, content_hash="b" * 64, transactions_json="[]",
+        )
+        s.add(imp)
+        s.flush()  # imp.id for the dividend FK
+        s.add(models.PortfolioDividend(
+            telegram_id=pid, import_id=imp.id, sgi="SGI Test",
+            symbol="NTLC", amount=1500.0, payment_date="2026-02-01",
+        ))
     return thread_ids
 
 
@@ -132,6 +144,8 @@ def _counts(user: dict) -> dict[str, int]:
             "refresh_tokens": n(models.RefreshToken, models.RefreshToken.user_id == uid),
             "devices": n(models.Device, models.Device.user_id == uid),
             "portfolio": n(models.Portfolio, models.Portfolio.telegram_id == pid),
+            "portfolio_imports": n(models.PortfolioImport, models.PortfolioImport.telegram_id == pid),
+            "portfolio_dividends": n(models.PortfolioDividend, models.PortfolioDividend.telegram_id == pid),
             "tracking": n(models.Tracking, models.Tracking.telegram_id == pid),
             "target_alerts": n(models.TargetAlert, models.TargetAlert.telegram_id == pid),
             "digest_subscriptions": n(models.DigestSubscription, models.DigestSubscription.telegram_id == pid),
@@ -144,6 +158,21 @@ def _counts(user: dict) -> dict[str, int]:
             ),
             "otp_codes": n(models.OtpCode, models.OtpCode.identifier == user["email"]),
         }
+
+
+def test_purge_list_covers_every_fk_to_users_telegram_id():
+    """Every table with an FK to users.telegram_id must appear in _counts
+    (i.e. in the deletion purge). A missing one = Postgres FK violation =
+    failed account deletion; SQLite never enforces FKs, so only this guard
+    catches a forgotten table in CI."""
+    referencing = set()
+    for table in models.Base.metadata.tables.values():
+        for fk in table.foreign_keys:
+            if fk.column.table.name == "users" and fk.column.name == "telegram_id":
+                referencing.add(table.name)
+    user, _tokens = _make_user("del-guard@example.com")
+    covered = set(_counts(user).keys())
+    assert referencing <= covered, f"tables missing from the purge: {referencing - covered}"
 
 
 # --- Password-protected accounts --------------------------------------------

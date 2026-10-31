@@ -292,9 +292,15 @@ def delete_app_user(user: dict[str, Any], password: str | None = None) -> dict[s
                 select(models.ThreadActivity.thread_id).where(thread_match)
             ).scalars().all()
         )
-        # FK-referenced children first, the app_users row last.
+        # FK-referenced children first, the app_users row last. Every table
+        # referencing users.telegram_id must be purged BEFORE the users row —
+        # portfolio_imports/portfolio_dividends too (dividends also reference
+        # the import): missing one makes Postgres reject the whole deletion
+        # (SQLite never enforced it, so this only failed in production).
         s.execute(delete(models.RefreshToken).where(models.RefreshToken.user_id == user_id))
         s.execute(delete(models.Device).where(models.Device.user_id == user_id))
+        s.execute(delete(models.PortfolioDividend).where(models.PortfolioDividend.telegram_id == principal_id))
+        s.execute(delete(models.PortfolioImport).where(models.PortfolioImport.telegram_id == principal_id))
         for model in (
             models.Portfolio,
             models.Tracking,
