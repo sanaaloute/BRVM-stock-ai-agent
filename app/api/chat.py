@@ -635,6 +635,7 @@ async def _lifespan(app: FastAPI):
     if config.DIGEST_ENABLED:
         tasks.append(asyncio.create_task(scheduler.digest_loop()))
     tasks.append(asyncio.create_task(scheduler.timeseries_loop()))
+    tasks.append(asyncio.create_task(scheduler.symbol_sections_loop()))
     yield
     for task in tasks:
         task.cancel()

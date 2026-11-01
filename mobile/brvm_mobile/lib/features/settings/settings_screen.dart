@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config.dart';
 import '../../core/format.dart';
@@ -14,11 +15,14 @@ import '../../core/theme_provider.dart';
 import '../../core/ui.dart';
 import '../portfolio/portfolio_models.dart';
 import '../portfolio/portfolio_providers.dart';
+import '../updates/app_update_providers.dart';
+import '../updates/update_dialog.dart';
 import 'settings_providers.dart';
 
 /// Onglet « Moi » (Compte) : en-tête profil (icône personne, nom, coordonnées),
-/// synthèse du portefeuille, préférences (apparence),
-/// quota, version, déconnexion et suppression du compte.
+/// synthèse du portefeuille, préférences (apparence), quota, contact WhatsApp,
+/// à propos (version, conditions, crédits), déconnexion et suppression du
+/// compte.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -79,6 +83,14 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          Text('Contact', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          const _ContactCard(),
+          const SizedBox(height: 16),
+          Text('À propos', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          const _AboutCard(),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -109,7 +121,6 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const _VersionTile(),
           ],
         ),
       ),
@@ -996,15 +1007,64 @@ class _AppearanceCard extends ConsumerWidget {
   }
 }
 
-class _VersionTile extends StatefulWidget {
-  const _VersionTile();
+/// Carte « Contact » : ouvre une discussion WhatsApp avec le support
+/// (message pré-rempli, l'application WhatsApp s'ouvre si installée).
+class _ContactCard extends StatelessWidget {
+  const _ContactCard();
+
+  Future<void> _openWhatsApp(BuildContext context) async {
+    final message = Uri.encodeComponent(
+      'Bonjour, je vous contacte depuis l’application ${AppConfig.appName}.',
+    );
+    final uri = Uri.parse(
+      'https://wa.me/${AppConfig.whatsappNumber}?text=$message',
+    );
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Impossible d’ouvrir WhatsApp.')),
+        );
+      }
+    }
+  }
 
   @override
-  State<_VersionTile> createState() => _VersionTileState();
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      child: ListTile(
+        leading: Icon(Icons.support_agent, color: colors.muted),
+        title: const Text('Contactez-nous'),
+        subtitle: Text(
+          'Discutez avec nous sur WhatsApp',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: colors.muted),
+        ),
+        trailing: Icon(Icons.open_in_new, size: 18, color: colors.muted),
+        onTap: () => _openWhatsApp(context),
+      ),
+    );
+  }
 }
 
-class _VersionTileState extends State<_VersionTile> {
-  String _version = AppConfig.appName;
+/// Carte « À propos » : icône, nom, version, courte description, accès aux
+/// conditions générales, bouton de mise à jour (visible uniquement si une
+/// version plus récente existe sur les stores) et crédit NeoByte Technology.
+class _AboutCard extends ConsumerStatefulWidget {
+  const _AboutCard();
+
+  @override
+  ConsumerState<_AboutCard> createState() => _AboutCardState();
+}
+
+class _AboutCardState extends ConsumerState<_AboutCard> {
+  /// « x.y.z (build) » une fois chargée ; vide tant qu'elle est
+  /// indisponible (la ligne version est alors masquée).
+  String _version = '';
 
   @override
   void initState() {
@@ -1016,22 +1076,120 @@ class _VersionTileState extends State<_VersionTile> {
     try {
       final info = await PackageInfo.fromPlatform();
       if (mounted) {
-        setState(() => _version = '${AppConfig.appName} v${info.version}');
+        setState(
+            () => _version = '${info.version} (${info.buildNumber})');
       }
     } catch (_) {
-      // Version indisponible (tests) : on garde le nom de l'app.
+      // Version indisponible (tests) : la ligne version reste masquée.
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      _version,
-      textAlign: TextAlign.center,
-      style: Theme.of(context)
-          .textTheme
-          .bodySmall
-          ?.copyWith(color: Theme.of(context).colorScheme.muted),
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    // Bouton de mise à jour : visible seulement si le store propose une
+    // version plus récente (indépendant de l'invite automatique ignorée).
+    final update = ref.watch(availableUpdateProvider).valueOrNull;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.candlestick_chart,
+                      color: colors.primary, size: 28),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        AppConfig.appName,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      if (_version.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Version $_version',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: colors.muted),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              AppConfig.appDescription,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: colors.muted, height: 1.4),
+            ),
+            const Divider(height: 24),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => context.push('/moi/conditions'),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: <Widget>[
+                    Icon(Icons.description_outlined,
+                        size: 18, color: colors.muted),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Conditions générales d’utilisation'),
+                    ),
+                    Icon(Icons.chevron_right, color: colors.muted),
+                  ],
+                ),
+              ),
+            ),
+            if (update != null) ...<Widget>[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: openStoreListing,
+                  icon: const Icon(Icons.system_update_alt_outlined,
+                      size: 18),
+                  label:
+                      Text('Mettre à jour vers ${update.latestVersion}'),
+                ),
+              ),
+            ],
+            const Divider(height: 24),
+            Center(
+              child: Column(
+                children: <Widget>[
+                  Text(
+                    'Conçu et développé par',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: colors.muted),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    AppConfig.designerName,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

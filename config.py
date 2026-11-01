@@ -305,6 +305,14 @@ TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
 
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS", "").strip()
 
+# Mobile update prompt: latest version published on the stores, served by
+# GET /mobile/v1/app-version. The app compares it with the installed version
+# and shows an update dialog when the store version is newer. Empty = the
+# app never prompts. Bump both values when a release goes live on the stores.
+MOBILE_APP_LATEST_VERSION = os.getenv("MOBILE_APP_LATEST_VERSION", "").strip()
+# Short changelog shown in the dialog; use \n for line breaks.
+MOBILE_APP_WHATS_NEW = os.getenv("MOBILE_APP_WHATS_NEW", "").strip()
+
 
 
 # Sika Finance tab enrichment: the weekly company-details refresh also fetches

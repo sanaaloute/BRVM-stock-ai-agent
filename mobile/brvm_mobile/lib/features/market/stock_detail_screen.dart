@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/format.dart';
-import '../../core/json_utils.dart';
 import '../../core/ui.dart';
 import 'stock_detail_models.dart';
 import 'stock_detail_providers.dart';
@@ -67,7 +66,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                       _ScoreCard(score: d.score!),
                     ],
                     const SizedBox(height: 12),
-                    _ProfileCard(detail: d),
+                    ..._spaced(_profileCards(d)),
                     const SizedBox(height: 12),
                     _DividendsCard(detail: d),
                     const SizedBox(height: 12),
@@ -531,8 +530,35 @@ class _ScoreCard extends StatelessWidget {
   }
 }
 
-/// Profil & fondamentaux : la fiche société (JSON arbitraire) est aplatie
-/// sur un niveau et rendue en paires libellé/valeur.
+/// Cartes de la fiche société : « Profil » (identité, direction,
+/// actionnaires), « Fondamentaux » (performance et données de marché) et
+/// « Analyse technique » (synthèse des signaux). La liste ne contient que
+/// les cartes pertinentes pour les données reçues.
+List<Widget> _profileCards(SymbolDetail d) {
+  if (d.profileError != null || d.companyProfile.isEmpty) {
+    return <Widget>[_ProfileCard(detail: d)];
+  }
+  final company = d.companyProfile;
+  return <Widget>[
+    if (company.hasIdentity) _ProfileCard(detail: d),
+    if (company.hasFundamentals) _FundamentalsCard(profile: company),
+    if (company.technical != null) _TechnicalsCard(summary: company.technical!),
+  ];
+}
+
+/// Espace les cartes de 12 px (la marge externe reste gérée par l'écran).
+List<Widget> _spaced(List<Widget> cards) {
+  return <Widget>[
+    for (var i = 0; i < cards.length; i++) ...<Widget>[
+      if (i > 0) const SizedBox(height: 12),
+      cards[i],
+    ],
+  ];
+}
+
+/// Profil : identité de la société, présentation (réécrite par l'IA),
+/// direction et actionnaires. Aucune donnée brute (JSON) ni champ interne
+/// (source, contact, date de collecte) n'est affiché.
 class _ProfileCard extends StatelessWidget {
   const _ProfileCard({required this.detail});
 
@@ -543,7 +569,7 @@ class _ProfileCard extends StatelessWidget {
     final theme = Theme.of(context);
     if (detail.profileError != null) {
       return _CardSection(
-        title: 'Profil & Fondamentaux',
+        title: 'Profil',
         child: Text(
           'Profil indisponible pour le moment.',
           style: theme.textTheme.bodyMedium
@@ -551,117 +577,506 @@ class _ProfileCard extends StatelessWidget {
         ),
       );
     }
-    final rows = _flattenProfile(detail.profile);
+    final company = detail.companyProfile;
+    if (company.isEmpty || !company.hasIdentity) {
+      return _CardSection(
+        title: 'Profil',
+        child: Text(
+          'Aucune information disponible.',
+          style: theme.textTheme.bodyMedium
+              ?.copyWith(color: theme.colorScheme.muted),
+        ),
+      );
+    }
     return _CardSection(
-      title: 'Profil & Fondamentaux',
-      child: rows.isEmpty
-          ? Text(
-              'Aucune information disponible.',
-              style: theme.textTheme.bodyMedium
+      title: 'Profil',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (company.presentation != null) ...<Widget>[
+            Text(
+              company.presentation!,
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Résumé rédigé par l'IA à partir de données publiques.",
+              style: theme.textTheme.labelSmall
                   ?.copyWith(color: theme.colorScheme.muted),
-            )
-          : Column(
+            ),
+            const SizedBox(height: 12),
+          ],
+          for (final row in <({String label, String value})>[
+            if (company.sectorName != null)
+              (label: 'Secteur', value: company.sectorName!),
+            if (company.code != null) (label: 'Code', value: company.code!),
+            if (company.nombreTitres != null)
+              (label: 'Nombre de titres', value: company.nombreTitres!),
+            if (company.flottant != null)
+              (label: 'Flottant', value: company.flottant!),
+            if (company.valorisation != null)
+              (label: 'Valorisation', value: company.valorisation!),
+          ])
+            _LabelValueRow(label: row.label, value: row.value),
+          if (company.dirigeants.isNotEmpty) ...<Widget>[
+            const _SubSectionTitle('Direction'),
+            for (final p in company.dirigeants)
+              _LabelValueRow(label: p.role, value: p.name),
+          ],
+          if (company.shareholders.isNotEmpty) ...<Widget>[
+            const _SubSectionTitle('Principaux actionnaires'),
+            _ShareholdersTable(shareholders: company.shareholders),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Fondamentaux : tableau de performance financière, indicateurs de marché,
+/// fourchettes de cours et dividendes annuels.
+class _FundamentalsCard extends StatelessWidget {
+  const _FundamentalsCard({required this.profile});
+
+  final CompanyProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final market = profile.market;
+    final day = market?.day;
+    return _CardSection(
+      title: 'Fondamentaux',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (profile.performance != null) ...<Widget>[
+            const _SubSectionTitle('Performance financière', top: 0),
+            _PerformanceTable(table: profile.performance!),
+          ],
+          if (market != null) ...<Widget>[
+            const _SubSectionTitle('Indicateurs de marché'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: <Widget>[
-                for (final row in rows)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            row.label,
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: theme.colorScheme.muted),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            row.value,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                      ],
-                    ),
+                if (market.beta1an != null)
+                  StatChip(
+                    label: 'Bêta (1 an)',
+                    value: formatAmount(market.beta1an),
+                  ),
+                if (market.rsi14 != null)
+                  StatChip(
+                    label: 'RSI (14 j)',
+                    value: formatAmount(market.rsi14),
+                  ),
+                if (market.capitalEchangePct != null)
+                  StatChip(
+                    label: 'Capital échangé',
+                    value: '${formatAmount(market.capitalEchangePct)} %',
+                  ),
+                if (market.valorisationMillions != null)
+                  StatChip(
+                    label: 'Valorisation',
+                    value:
+                        formatCompactFcfa(market.valorisationMillions! * 1e6),
                   ),
               ],
             ),
+          ],
+          if (day != null) ...<Widget>[
+            const _SubSectionTitle('Séance du jour'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                if (day.open != null)
+                  StatChip(label: 'Ouverture', value: formatAmount(day.open)),
+                if (day.high != null)
+                  StatChip(label: 'Plus haut', value: formatAmount(day.high)),
+                if (day.low != null)
+                  StatChip(label: 'Plus bas', value: formatAmount(day.low)),
+                if (day.volume != null)
+                  StatChip(
+                    label: 'Volume',
+                    value: formatCompactAmount(day.volume),
+                  ),
+              ],
+            ),
+          ],
+          if (profile.ranges.isNotEmpty) ...<Widget>[
+            const _SubSectionTitle('Fourchettes de cours'),
+            _RangesTable(ranges: profile.ranges),
+          ],
+          if (profile.dividendHistory.isNotEmpty) ...<Widget>[
+            const _SubSectionTitle('Dividendes par exercice'),
+            _DividendYearsTable(dividends: profile.dividendHistory),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Analyse technique : synthèse des signaux détectés (comptages par groupe
+/// et direction dominante). Les textes détaillés, repris d'une source
+/// externe, ne sont volontairement pas affichés.
+class _TechnicalsCard extends StatelessWidget {
+  const _TechnicalsCard({required this.summary});
+
+  final TechnicalSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return _CardSection(
+      title: 'Analyse technique',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          _LabelValueRow(
+            label: 'Lecture globale',
+            value: _majorityLabel(summary.majority),
+            valueColor: _majorityColor(summary.majority, colors),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              _SignalCountChip(
+                  count: summary.up, singular: 'haussier', color: colors.gain),
+              _SignalCountChip(
+                  count: summary.down, singular: 'baissier', color: colors.loss),
+              _SignalCountChip(
+                  count: summary.neutral,
+                  singular: 'neutre',
+                  color: colors.muted),
+            ],
+          ),
+          if (summary.groups.isNotEmpty) ...<Widget>[
+            const _SubSectionTitle('Par famille de signaux'),
+            for (final g in summary.groups)
+              _LabelValueRow(
+                label: g.label,
+                value:
+                    '${_majorityLabel(g.majority)} · ${g.majorityCount}/${g.total}',
+                valueColor: _majorityColor(g.majority, colors),
+              ),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            'Synthèse calculée à partir des signaux techniques détectés.',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: colors.muted),
+          ),
+        ],
+      ),
     );
   }
 
-  List<({String label, String value})> _flattenProfile(
-    Map<String, dynamic> profile,
-  ) {
-    final rows = <({String label, String value})>[];
-    for (final entry in profile.entries) {
-      final value = entry.value;
-      if (value is Map) {
-        // Aplatissement d'un niveau : les clés enfants portent le libellé.
-        for (final child in asMap(value).entries) {
-          final text = _stringify(child.value);
-          if (text == null) continue;
-          rows.add((label: _label(child.key), value: text));
-        }
-      } else {
-        final text = _stringify(value);
-        if (text == null) continue;
-        rows.add((label: _label(entry.key), value: text));
-      }
+  static String _majorityLabel(String majority) {
+    return switch (majority) {
+      'up' => 'Haussier',
+      'down' => 'Baissier',
+      _ => 'Neutre',
+    };
+  }
+
+  static Color _majorityColor(String majority, ColorScheme colors) {
+    return switch (majority) {
+      'up' => colors.gain,
+      'down' => colors.loss,
+      _ => colors.muted,
+    };
+  }
+}
+
+class _SignalCountChip extends StatelessWidget {
+  const _SignalCountChip({
+    required this.count,
+    required this.singular,
+    required this.color,
+  });
+
+  final int count;
+  final String singular;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 1 ? '${singular}s' : singular;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        '$count $label',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+      ),
+    );
+  }
+}
+
+/// Ligne libellé/valeur utilisée dans les cartes de la fiche.
+class _LabelValueRow extends StatelessWidget {
+  const _LabelValueRow({
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.muted),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(color: valueColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Titre de sous-section à l'intérieur d'une carte.
+class _SubSectionTitle extends StatelessWidget {
+  const _SubSectionTitle(this.text, {this.top = 14});
+
+  final String text;
+  final double top;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(top: top, bottom: 8),
+      child: Text(
+        text,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.muted,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Style commun des tableaux de la fiche : liserés horizontaux discrets.
+class _FicheTable extends StatelessWidget {
+  const _FicheTable({
+    required this.columnWidths,
+    required this.headers,
+    required this.rows,
+    this.numericColumns = const <int>{},
+  });
+
+  final Map<int, TableColumnWidth> columnWidths;
+
+  /// Libellés d'en-tête (chaîne vide = cellule muette, ex. colonne métrique).
+  final List<String> headers;
+
+  /// Cellules déjà rendues en texte brut ; `—` si absente.
+  final List<List<String>> rows;
+
+  /// Colonnes alignées à droite (chiffres).
+  final Set<int> numericColumns;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final headerStyle = theme.textTheme.labelSmall?.copyWith(
+      color: colors.muted,
+      fontWeight: FontWeight.w700,
+    );
+    final cellStyle = theme.textTheme.bodySmall?.copyWith(
+      fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+    );
+    final borderSide = BorderSide(color: colors.outline.withValues(alpha: 0.15));
+
+    Widget cell(String text, int column, {required bool header}) {
+      final align =
+          numericColumns.contains(column) ? TextAlign.right : TextAlign.left;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+        child: Text(
+          text,
+          textAlign: align,
+          style: header ? headerStyle : cellStyle,
+        ),
+      );
     }
-    return rows;
+
+    return Table(
+      columnWidths: columnWidths,
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      border: TableBorder(
+        top: borderSide,
+        bottom: borderSide,
+        horizontalInside: borderSide,
+      ),
+      children: <TableRow>[
+        TableRow(
+          children: <Widget>[
+            for (var c = 0; c < headers.length; c++)
+              cell(headers[c], c, header: true),
+          ],
+        ),
+        for (final row in rows)
+          TableRow(
+            children: <Widget>[
+              for (var c = 0; c < row.length; c++) cell(row[c], c, header: false),
+            ],
+          ),
+      ],
+    );
   }
+}
 
-  /// Libellés français connus ; repli : clé brute humanisée.
-  static const _labels = <String, String>{
-    'nom': 'Nom',
-    'name': 'Nom',
-    'raison_sociale': 'Raison sociale',
-    'symbole': 'Symbole',
-    'symbol': 'Symbole',
-    'secteur': 'Secteur',
-    'secteur_activite': "Secteur d'activité",
-    'activites': 'Activités',
-    'description': 'Présentation',
-    'capitalisation': 'Capitalisation',
-    'capitalisation_boursiere': 'Capitalisation boursière',
-    'per': 'PER',
-    'PER': 'PER',
-    'beta': 'Bêta',
-    'dividende': 'Dividende',
-    'rendement_dividende': 'Rendement du dividende',
-    'rendement': 'Rendement',
-    'date_incorporation': "Date d'incorporation",
-    'date_introduction': "Date d'introduction",
-    'introduction': "Date d'introduction",
-    'site_web': 'Site web',
-    'siege': 'Siège',
-    'effectif': 'Effectif',
-    'chiffre_affaires': "Chiffre d'affaires",
-    'resultat_net': 'Résultat net',
-    'francs': 'Francs',
-    'cours': 'Cours',
-    'cours_actuel': 'Cours actuel',
-    'dirigeants': 'Dirigeants',
-    'telephone': 'Téléphone',
-    'fax': 'Fax',
-  };
+/// Actionnaires : nom + part en pourcentage.
+class _ShareholdersTable extends StatelessWidget {
+  const _ShareholdersTable({required this.shareholders});
 
-  String _label(String key) {
-    final known = _labels[key] ?? _labels[key.toLowerCase()];
-    if (known != null) return known;
-    final cleaned = key.replaceAll('_', ' ').trim();
-    if (cleaned.isEmpty) return key;
-    return cleaned[0].toUpperCase() + cleaned.substring(1);
+  final List<Shareholder> shareholders;
+
+  @override
+  Widget build(BuildContext context) {
+    return _FicheTable(
+      columnWidths: const <int, TableColumnWidth>{
+        0: FlexColumnWidth(3),
+        1: FlexColumnWidth(1),
+      },
+      headers: const <String>['Actionnaire', 'Part'],
+      numericColumns: const <int>{1},
+      rows: <List<String>>[
+        for (final s in shareholders)
+          <String>[
+            s.name ?? '—',
+            s.pct == null ? '—' : (s.pct!.contains('%') ? s.pct! : '${s.pct} %'),
+          ],
+      ],
+    );
   }
+}
 
-  String? _stringify(dynamic value) {
-    if (value == null) return null;
-    if (value is bool) return value ? 'Oui' : 'Non';
-    if (value is num) return formatAmount(value.toDouble());
-    final text = value.toString().trim();
-    return text.isEmpty ? null : text;
+/// Performance financière : métriques en lignes, années en colonnes ; le
+/// tableau défile horizontalement si les années débordent.
+class _PerformanceTable extends StatelessWidget {
+  const _PerformanceTable({required this.table});
+
+  final PerformanceTable table;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: _FicheTable(
+        columnWidths: <int, TableColumnWidth>{
+          0: const FixedColumnWidth(150),
+          for (var i = 1; i <= table.years.length; i++)
+            i: const FixedColumnWidth(78),
+        },
+        headers: <String>['', ...table.years],
+        numericColumns: <int>{
+          for (var i = 1; i <= table.years.length; i++) i,
+        },
+        rows: <List<String>>[
+          for (final row in table.rows)
+            <String>[
+              row.label,
+              for (final year in table.years) row.byYear[year] ?? '—',
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Fourchettes de cours par période, variation colorée.
+class _RangesTable extends StatelessWidget {
+  const _RangesTable({required this.ranges});
+
+  final List<PriceRange> ranges;
+
+  @override
+  Widget build(BuildContext context) {
+    return _FicheTable(
+      columnWidths: const <int, TableColumnWidth>{
+        0: FlexColumnWidth(2),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(1),
+        3: FlexColumnWidth(1),
+      },
+      headers: const <String>['Période', 'Plus haut', 'Plus bas', 'Var.'],
+      numericColumns: const <int>{1, 2, 3},
+      rows: <List<String>>[
+        for (final r in ranges)
+          <String>[
+            r.label,
+            formatAmount(r.high),
+            formatAmount(r.low),
+            formatPercent(r.variationPct),
+          ],
+      ],
+    );
+  }
+}
+
+/// Dividendes annuels (montant + rendement).
+class _DividendYearsTable extends StatelessWidget {
+  const _DividendYearsTable({required this.dividends});
+
+  final List<DividendYear> dividends;
+
+  @override
+  Widget build(BuildContext context) {
+    return _FicheTable(
+      columnWidths: const <int, TableColumnWidth>{
+        0: FlexColumnWidth(1),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(1),
+      },
+      headers: const <String>['Année', 'Dividende (FCFA)', 'Rendement'],
+      numericColumns: const <int>{1, 2},
+      rows: <List<String>>[
+        for (final d in dividends)
+          <String>[
+            d.year?.toString() ?? '—',
+            formatAmount(d.montant),
+            d.rendementPct == null
+                ? '—'
+                : '${formatAmount(d.rendementPct)} %',
+          ],
+      ],
+    );
   }
 }
 

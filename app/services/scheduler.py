@@ -7,6 +7,7 @@ process:
 - market digest for subscribers (weekdays at DIGEST_HOUR_GMT; weekly edition on
   Friday too)
 - daily timeseries CSV refresh
+- daily post-close refresh of the per-symbol dividends/news/prediction store
 """
 from __future__ import annotations
 
@@ -76,6 +77,32 @@ async def digest_loop() -> None:
             break
         except Exception as e:
             logger.exception("Digest job failed: %s", e)
+
+
+async def symbol_sections_loop() -> None:
+    """Once per weekday after 16:30 GMT (post-close): refresh the cached
+    dividends/news/prediction sections for all symbols so the mobile fiche
+    reads a store instead of scraping richbourse.com on every request."""
+    from app.services.symbol_sections import refresh_all
+
+    last_run: datetime.date | None = None
+    while True:
+        await asyncio.sleep(60)
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            # Market closes ~15:00 GMT; same gate as the daily snapshot job.
+            if now.weekday() > 4 or (now.hour, now.minute) < (16, 30):
+                continue
+            if last_run == now.date():
+                continue
+            last_run = now.date()
+            # Blocking (one HTTP scrape per symbol per section): off the loop.
+            stats = await asyncio.to_thread(refresh_all)
+            logger.info("Symbol sections refreshed: %s", stats)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.exception("Symbol sections refresh failed: %s", e)
 
 
 async def timeseries_loop() -> None:

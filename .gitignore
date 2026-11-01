@@ -33,6 +33,7 @@ app/data/*.db
 app/data/*.db-wal
 app/data/*.db-shm
 app/data/palmares_cache.json
+app/data/symbol_sections_cache.json
 app/data/sgi_brvm.json
 app/data/company_details/
 debug-ce8ad8.log

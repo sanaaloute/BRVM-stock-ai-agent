@@ -17,6 +17,10 @@ import 'features/market/market_screen.dart';
 import 'features/market/stock_detail_screen.dart';
 import 'features/portfolio/portfolio_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/settings/terms_screen.dart';
+import 'features/updates/app_update_models.dart';
+import 'features/updates/app_update_providers.dart';
+import 'features/updates/update_dialog.dart';
 
 /// Palette « fintech futuriste » : fond bleu nuit profond, émeraude vive,
 /// accent doré. Le thème sombre est le thème par défaut.
@@ -247,6 +251,10 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: '/moi',
                 builder: (context, state) => const SettingsScreen(),
               ),
+              GoRoute(
+                path: '/moi/conditions',
+                builder: (context, state) => const TermsScreen(),
+              ),
             ],
           ),
         ],
@@ -256,7 +264,7 @@ final routerProvider = Provider<GoRouter>((ref) {
 });
 
 /// Coquille principale : barre de navigation inférieure (5 onglets).
-class HomeShell extends StatelessWidget {
+class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
@@ -269,20 +277,41 @@ class HomeShell extends StatelessWidget {
     _Destination('Moi', Icons.person_outline, Icons.person),
   ];
 
-  void _onTap(int index) => navigationShell.goBranch(
+  @override
+  ConsumerState<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends ConsumerState<HomeShell> {
+  /// L'invite de mise à jour ne s'affiche qu'une fois par lancement,
+  /// quel que soit l'onglet visité.
+  bool _updatePromptShown = false;
+
+  void _onTap(int index) => widget.navigationShell.goBranch(
         index,
-        initialLocation: index == navigationShell.currentIndex,
+        initialLocation: index == widget.navigationShell.currentIndex,
       );
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<AppUpdate?>>(availableUpdateProvider, (previous, next) {
+      final update = next.valueOrNull;
+      if (update == null || _updatePromptShown) return;
+      _updatePromptShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        showDialog<void>(
+          context: context,
+          builder: (context) => UpdateAvailableDialog(update: update),
+        );
+      });
+    });
     return Scaffold(
-      body: navigationShell,
+      body: widget.navigationShell,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: navigationShell.currentIndex,
+        selectedIndex: widget.navigationShell.currentIndex,
         onDestinationSelected: _onTap,
         destinations: <Widget>[
-          for (final d in _destinations)
+          for (final d in HomeShell._destinations)
             NavigationDestination(
               icon: Icon(d.icon),
               selectedIcon: Icon(d.selectedIcon),

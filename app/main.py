@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Background jobs: stale-thread memory cleanup, market snapshot refresh,
-    digest, price-target alerts and the daily timeseries update."""
+    digest, price-target alerts, the daily timeseries update and the daily
+    post-close refresh of the per-symbol sections store."""
 
     async def memory_cleanup_loop() -> None:
         while True:
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
     if config.DIGEST_ENABLED:
         tasks.append(asyncio.create_task(scheduler.digest_loop()))
     tasks.append(asyncio.create_task(scheduler.timeseries_loop()))
+    tasks.append(asyncio.create_task(scheduler.symbol_sections_loop()))
     yield
     for task in tasks:
         task.cancel()

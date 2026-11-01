@@ -1,6 +1,9 @@
 """Mobile app REST API (Flutter). Everything here requires a JWT bearer token
 issued by /mobile/v1/auth — the mobile client never uses the shared
 API_SECRET_KEY. User data is keyed by the app user's principal id.
+
+Exception: GET /mobile/v1/app-version is public — it only serves the store
+release metadata (latest version + changelog) for the app's update prompt.
 """
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ from pydantic import BaseModel, Field
 
 import config
 from app.api.mobile_auth import require_app_user
-from app.services import auth_service, sgi_import
+from app.services import auth_service, company_profile, sgi_import
 from app.utils import user_db
 
 router = APIRouter(prefix="/mobile/v1", tags=["mobile"])
@@ -22,6 +25,24 @@ router = APIRouter(prefix="/mobile/v1", tags=["mobile"])
 
 def _principal(user: dict[str, Any]) -> int:
     return int(user["principal_id"])
+
+
+# --- App release metadata (public, no auth) -----------------------------------
+
+@router.get("/app-version")
+def mobile_app_version() -> dict[str, Any]:
+    """Latest store release for the mobile app's update prompt.
+
+    latest_version empty server-side => null => the client never prompts.
+    MOBILE_APP_WHATS_NEW uses literal \\n sequences (env-friendly), converted
+    to real newlines here.
+    """
+    latest = config.MOBILE_APP_LATEST_VERSION
+    whats_new = config.MOBILE_APP_WHATS_NEW.replace("\\n", "\n")
+    return {
+        "latest_version": latest or None,
+        "whats_new": whats_new or None,
+    }
 
 
 # --- Market data (no AI round-trip) -------------------------------------------
@@ -304,10 +325,12 @@ def _safe_section(fn, *args, **kwargs) -> dict[str, Any]:
 def market_symbol_detail(symbol: str, period: str = "3M", user: dict = Depends(require_app_user)) -> dict[str, Any]:
     """Aggregated investor view for one stock: quote + price history + company
     fiche (fundamentals) + dividends + news/activity + technical prediction.
-    Sections degrade independently (scrapers can be slow/down)."""
+    Sections degrade independently (scrapers can be slow/down). Dividends,
+    news and prediction come from the daily-refreshed section store
+    (app.services.symbol_sections), never scraped live per request."""
     from app.scrapers.sikafinance_company import load_company_details
+    from app.services import symbol_sections
     from app.services.market_data import palmares_for_api
-    from app.utils.news import get_company_news, get_richbourse_dividends, get_richbourse_prediction
 
     sym = symbol.strip().upper()
     if sym not in user_db.get_valid_symbols():
@@ -319,17 +342,21 @@ def market_symbol_detail(symbol: str, period: str = "3M", user: dict = Depends(r
     )
     history = _safe_section(lambda: {"points": _load_history(sym, period)})
     fiche = _safe_section(load_company_details, sym)
-    dividends = _safe_section(get_richbourse_dividends, 50, sym)
-    news = _safe_section(get_company_news, sym)
-    prediction = _safe_section(get_richbourse_prediction, sym)
+    dividends = _safe_section(symbol_sections.dividends_for, sym)
+    news = _safe_section(symbol_sections.news_for, sym)
+    prediction = _safe_section(symbol_sections.prediction_for, sym)
     score = _safe_section(_latest_score, sym)
+
+    # Fiche société : champs internes retirés et présentation réécrite par
+    # l'IA (le texte source scrapé n'est jamais renvoyé tel quel).
+    profile = company_profile.mobile_company_profile(sym, _scrub_vendor_refs(fiche))
 
     return {
         "symbol": sym,
         "period": period.upper(),
         "quote": palmares_row,
         "history": history.get("points") if "points" in history else history,
-        "profile": _scrub_vendor_refs(fiche),
+        "profile": profile,
         "dividends": _scrub_vendor_refs(dividends),
         "news": _scrub_vendor_refs(news),
         "prediction": _scrub_vendor_refs(prediction),
