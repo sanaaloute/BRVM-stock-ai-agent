@@ -652,7 +652,9 @@ app.include_router(router)
 from app.api.mobile_auth import router as mobile_auth_router  # noqa: E402
 from app.api.mobile import router as mobile_router  # noqa: E402
 from app.api.privacy import router as privacy_router  # noqa: E402
+from app.api.admin import router as admin_router  # noqa: E402
 
 app.include_router(mobile_auth_router)
 app.include_router(mobile_router)
 app.include_router(privacy_router)
+app.include_router(admin_router)

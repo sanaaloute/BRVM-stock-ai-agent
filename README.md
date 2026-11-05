@@ -130,6 +130,12 @@ missing legacy `users` identity rows for imported app accounts and referenced
 portfolio records when needed by foreign keys. Keep both backups until you have
 verified that users can log in and their portfolios are present.
 
+### Admin dashboard
+
+The API serves an admin dashboard at `/admin` (e.g.
+`https://kbourse.neobytech.net/admin` in production). Access requires an
+administrator login.
+
 ## Mobile app
 
 The Flutter application is in [`mobile/`](mobile/README.md). It uses

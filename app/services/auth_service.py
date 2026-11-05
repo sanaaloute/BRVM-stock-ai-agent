@@ -250,19 +250,25 @@ def get_or_create_app_user(email: str | None = None, phone: str | None = None) -
 
 
 def get_app_user_by_id(user_id: uuid.UUID) -> dict[str, Any] | None:
+    """Active app user by id (deactivated accounts resolve to None, so their
+    access/refresh tokens stop authenticating immediately)."""
     db_migrate.ensure_schema()
     with db_engine.session_scope() as s:
         row = s.execute(
-            select(models.AppUser).where(models.AppUser.id == user_id)
+            select(models.AppUser).where(
+                models.AppUser.id == user_id,
+                models.AppUser.is_active == 1,
+            )
         ).scalars().first()
         return _user_dict(row) if row else None
 
 
-def delete_app_user(user: dict[str, Any], password: str | None = None) -> dict[str, Any]:
+def delete_app_user(user: dict[str, Any], password: str | None = None, *, skip_password_check: bool = False) -> dict[str, Any]:
     """Delete an app account and every row it owns, in one transaction.
 
     Accounts with a password must confirm it (``wrong_password`` otherwise);
-    passwordless accounts (demo/mock) delete without one. LangGraph
+    passwordless accounts (demo/mock) delete without one. Admin deletion
+    (dashboard) passes ``skip_password_check=True``. LangGraph
     checkpoints live outside this DB and are purged best-effort afterwards —
     their failure never rolls the account deletion back. DB purge errors may
     propagate.
@@ -275,7 +281,7 @@ def delete_app_user(user: dict[str, Any], password: str | None = None) -> dict[s
         ).scalars().first()
         if row is None:
             return {"ok": True}  # already gone: deletion is idempotent
-        if row.password_hash is not None and (
+        if not skip_password_check and row.password_hash is not None and (
             not password or not verify_password(password, row.password_hash)
         ):
             return {"ok": False, "error": "wrong_password"}

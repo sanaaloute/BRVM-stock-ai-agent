@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="%230b6e4f"/><text x="32" y="44" font-family="Arial,sans-serif" font-size="34" font-weight="bold" fill="white" text-anchor="middle">K</text></svg>'>
+<title>Kora Bourse — Admin</title>
+<style>
+  :root {
+    --green: #0b6e4f; --green-dk: #085c41; --bg: #f2f5f3; --card: #ffffff;
+    --ink: #1c2430; --muted: #5a6575; --line: #dde5e1; --red: #b3352b;
+    --amber: #b97b12; --blue: #2563a8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--green); outline-offset: 1px; }
+
+  /* --- header --- */
+  header { background: var(--green); color: #fff; padding: 0 20px; display: flex;
+           align-items: center; gap: 18px; height: 56px; position: sticky; top: 0; z-index: 10; }
+  header .brand { font-weight: 700; font-size: 1.05rem; white-space: nowrap; }
+  header .brand span { opacity: .75; font-weight: 400; }
+  header nav { display: flex; gap: 4px; flex: 1; }
+  header nav button { background: none; border: none; color: #d8eae2; padding: 8px 14px;
+                      border-radius: 8px; font-size: .95rem; }
+  header nav button.active { background: rgba(255,255,255,.16); color: #fff; font-weight: 600; }
+  header nav button:hover { background: rgba(255,255,255,.10); }
+  header .logout { background: none; border: 1px solid rgba(255,255,255,.4); color: #fff;
+                   padding: 6px 12px; border-radius: 8px; font-size: .85rem; }
+  header .logout:hover { background: rgba(255,255,255,.12); }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  /* --- login --- */
+  #login-view { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .login-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+                padding: 34px 30px; width: 100%; max-width: 380px; box-shadow: 0 6px 24px rgba(16,42,33,.08); }
+  .login-card h1 { color: var(--green); font-size: 1.3rem; margin: 0 0 4px; }
+  .login-card p.sub { color: var(--muted); font-size: .88rem; margin: 0 0 22px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: .82rem; color: var(--muted); margin-bottom: 5px; }
+  .field input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; font-size: .95rem; }
+  .btn { background: var(--green); color: #fff; border: none; border-radius: 9px; padding: 10px 16px;
+         font-size: .95rem; font-weight: 600; }
+  .btn:hover:not(:disabled) { background: var(--green-dk); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.block { width: 100%; }
+  .btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .btn.ghost:hover:not(:disabled) { background: #eef2f0; }
+  .btn.danger { background: var(--red); }
+  .btn.danger:hover:not(:disabled) { background: #93291f; }
+  .btn.small { padding: 6px 12px; font-size: .85rem; border-radius: 7px; }
+  .error-msg { color: var(--red); font-size: .87rem; margin: 10px 0 0; min-height: 1.1em; }
+
+  /* --- banners & toasts --- */
+  .notice { padding: 10px 12px; border-radius: 8px; font-size: .85rem; margin: 12px 0; }
+  .notice.warn { background: #fbf3dd; color: var(--amber); border: 1px solid #eedfae; }
+  .notice.error { background: #f6dcd9; color: var(--red); border: 1px solid #ecc4bf; }
+  #http-warning { position: sticky; top: 56px; z-index: 9; border-radius: 0; margin: 0; text-align: center; }
+  #toasts { position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex;
+            flex-direction: column; gap: 8px; }
+  .toast { padding: 11px 16px; border-radius: 9px; color: #fff; font-size: .88rem;
+           box-shadow: 0 6px 18px rgba(0,0,0,.2); opacity: 0; transform: translateY(8px);
+           transition: opacity .25s, transform .25s; max-width: 340px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.ok { background: var(--green-dk); }
+  .toast.error { background: var(--red); }
+
+  /* --- cards & layout --- */
+  .grid { display: grid; gap: 14px; }
+  .grid.cards { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card h3 { margin: 0 0 4px; font-size: .78rem; font-weight: 600; color: var(--muted);
+             text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 1.55rem; font-weight: 700; color: var(--ink); display: inline-block; }
+  .card .hint { font-size: .78rem; color: var(--muted); margin-top: 3px; }
+  .delta { display: inline-block; margin-left: 8px; font-size: .76rem; font-weight: 700;
+           padding: 2px 7px; border-radius: 12px; vertical-align: middle; }
+  .delta.up { background: #dcefe4; color: var(--green-dk); }
+  .delta.down { background: #f6dcd9; color: var(--red); }
+  .delta.flat { background: #e8eeeb; color: var(--muted); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+           padding: 18px 20px; margin-bottom: 18px; }
+  .panel h2 { margin: 0 0 14px; font-size: 1rem; }
+  .panel h2 .sub { font-weight: 400; color: var(--muted); font-size: .8rem; margin-left: 8px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+  .section-head { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 14px; }
+  .section-head h2 { margin: 0; font-size: 1.1rem; }
+  .section-head .actions { display: flex; gap: 8px; align-items: center; }
+  .updated { color: var(--muted); font-size: .8rem; }
+
+  /* --- bar rows (adoption, symbols, splits) --- */
+  .bar-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; font-size: .88rem; }
+  .bar-row .label { width: 130px; flex-shrink: 0; color: var(--ink); overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+  .bar-row .track { flex: 1; background: #e8eeeb; border-radius: 6px; height: 14px; overflow: hidden; }
+  .bar-row .fill { height: 100%; background: var(--green); border-radius: 6px; min-width: 2px; }
+  .bar-row .fill.blue { background: var(--blue); }
+  .bar-row .num { width: 110px; flex-shrink: 0; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* --- chart --- */
+  .chart-wrap { width: 100%; overflow-x: auto; }
+  svg.chart { display: block; width: 100%; min-width: 420px; height: auto; }
+  .legend { display: flex; gap: 16px; font-size: .8rem; color: var(--muted); margin-top: 8px; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+  .legend .ln { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 5px;
+                vertical-align: middle; }
+  .chart-empty { color: var(--muted); font-size: .83rem; padding: 8px 0 0; }
+
+  /* --- users table --- */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input[type=search] { flex: 1; min-width: 200px; padding: 9px 12px; border: 1px solid var(--line);
+                                border-radius: 9px; font-size: .92rem; }
+  .toolbar select { padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px;
+                    font-size: .9rem; background: #fff; color: var(--ink); }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; min-width: 640px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: .76rem;
+       text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 2px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f4f8f6; }
+  .u-name { font-weight: 600; }
+  .u-id2 { color: var(--muted); font-size: .8rem; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: .75rem; font-weight: 600; }
+  .pill.on { background: #dcefe4; color: var(--green-dk); }
+  .pill.off { background: #f6dcd9; color: var(--red); }
+  .pill.dev { background: #e3ecf7; color: var(--blue); margin-left: 4px; }
+  .pager { display: flex; align-items: center; gap: 12px; justify-content: flex-end; margin-top: 14px;
+           color: var(--muted); font-size: .86rem; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 0; }
+
+  /* --- drawer --- */
+  #drawer-backdrop { position: fixed; inset: 0; background: rgba(12,24,19,.45); z-index: 40; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); background: var(--card);
+            z-index: 41; box-shadow: -8px 0 30px rgba(0,0,0,.18); overflow-y: auto; padding: 22px 24px 60px; }
+  #drawer .close { position: absolute; top: 14px; right: 14px; background: none; border: none;
+                   font-size: 1.4rem; color: var(--muted); line-height: 1; }
+  #drawer h2 { margin: 0 30px 2px 0; font-size: 1.15rem; }
+  #drawer .dsub { color: var(--muted); font-size: .84rem; margin-bottom: 16px; word-break: break-all; }
+  .kv { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; font-size: .88rem; margin-bottom: 18px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-word; }
+  #drawer h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+               margin: 20px 0 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+  .action-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .loading { color: var(--muted); text-align: center; padding: 60px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="http-warning" class="notice warn" hidden>
+  You are connected over plain HTTP — credentials and session tokens are exposed. Open the dashboard through its HTTPS URL instead.
+</div>
+
+<div id="login-view">
+  <form class="login-card" id="login-form">
+    <h1>Kora Bourse</h1>
+    <p class="sub">Admin dashboard — sign in to continue</p>
+    <div class="field">
+      <label for="login-username">Username</label>
+      <input id="login-username" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn block" id="login-btn" type="submit">Sign in</button>
+    <p class="error-msg" id="login-error"></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <div class="brand">Kora Bourse <span>· Admin</span></div>
+    <nav>
+      <button id="nav-overview" class="active" type="button">Overview</button>
+      <button id="nav-users" type="button">Users</button>
+    </nav>
+    <button class="logout" id="logout-btn" type="button">Log out</button>
+  </header>
+
+  <main>
+    <section id="tab-overview">
+      <div class="section-head">
+        <h2>Platform overview</h2>
+        <div class="actions">
+          <span class="updated" id="overview-updated"></span>
+          <button class="btn ghost small" id="refresh-overview" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="notice error" id="overview-error" hidden></div>
+      <div class="grid cards" id="stat-cards"></div>
+      <div class="two-col">
+        <div class="panel">
+          <h2>Signups <span class="sub">new accounts per day</span></h2>
+          <div class="chart-wrap" id="chart-signups"></div>
+        </div>
+        <div class="panel">
+          <h2>Chat usage <span class="sub">messages (bars) &amp; active users (line) per day</span></h2>
+          <div class="chart-wrap" id="chart-usage"></div>
+          <div class="legend">
+            <span><span class="sw" style="background:#0b6e4f"></span>Messages (left)</span>
+            <span><span class="ln" style="background:#2563a8"></span>Active users (right)</span>
+          </div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="panel">
+          <h2>Feature adoption <span class="sub">share of app users</span></h2>
+          <div id="adoption"></div>
+        </div>
+        <div class="panel">
+          <h2>Audience <span class="sub">devices &amp; login identifiers</span></h2>
+          <div id="audience"></div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="panel">
+          <h2>Most watched stocks <span class="sub">watchlist entries</span></h2>
+          <div id="top-symbols"></div>
+        </div>
+        <div class="panel">
+          <h2>System <span class="sub">data jobs &amp; quota</span></h2>
+          <div id="system"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-users" hidden>
+      <div class="section-head">
+        <h2>Users</h2>
+        <div class="actions">
+          <span class="updated" id="users-count"></span>
+          <button class="btn ghost small" id="refresh-users" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="notice error" id="users-error" hidden></div>
+      <div class="panel">
+        <div class="toolbar">
+          <input type="search" id="user-search" placeholder="Search by name, email or phone…" aria-label="Search users">
+          <select id="user-status" aria-label="Filter by status">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="deactivated">Deactivated</option>
+          </select>
+          <select id="user-sort" aria-label="Sort by">
+            <option value="created_at">Recently joined</option>
+            <option value="last_active">Last active</option>
+            <option value="messages">Most active (30d)</option>
+          </select>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th><th>Joined</th><th>Last active</th>
+                <th>Msgs 30d</th><th>Today</th><th>Devices</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="users-empty" hidden>No users found.</div>
+        <div class="pager">
+          <button class="btn ghost small" id="page-prev" type="button">← Prev</button>
+          <span id="page-info"></span>
+          <button class="btn ghost small" id="page-next" type="button">Next →</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="drawer-backdrop" hidden></div>
+<aside id="drawer" hidden>
+  <button class="close" id="drawer-close" type="button" aria-label="Close">×</button>
+  <div id="drawer-content"></div>
+</aside>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+"use strict";
+const TOKEN_KEY = "kb_admin_token";
+const $ = (id) => document.getElementById(id);
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+function fmt(n) {
+  if (n === null || n === undefined) return "—";
+  return Number(n).toLocaleString("en-US");
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"});
+}
+function fmtDay(day) {
+  if (!day) return "—";
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(day + "T00:00:00");
+  const diff = Math.round((today - d) / 86400000);
+  if (diff === 0) return "today";
+  if (diff === 1) return "yesterday";
+  if (diff > 1 && diff < 30) return diff + "d ago";
+  return fmtDate(day);
+}
+function fmtTs(epochSec) {
+  if (!epochSec) return "—";
+  return new Date(epochSec * 1000).toLocaleString("en-GB", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"});
+}
+
+/* --- toasts --- */
+function toast(msg, kind) {
+  const t = el("div", "toast " + (kind || "ok"), msg);
+  $("toasts").appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => {
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 300);
+  }, 3400);
+}
+
+/* --- session --- */
+function token() { return sessionStorage.getItem(TOKEN_KEY); }
+function setSession(tok) { sessionStorage.setItem(TOKEN_KEY, tok); }
+function clearSession() { sessionStorage.removeItem(TOKEN_KEY); }
+
+async function api(path, options) {
+  const opts = options || {};
+  opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token() });
+  if (opts.body && typeof opts.body !== "string") {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(opts.body);
+  }
+  const resp = await fetch(path, opts);
+  if (resp.status === 401) {
+    clearSession();
+    showLogin("Session expired — please sign in again.");
+    throw new Error("unauthorized");
+  }
+  let data = null;
+  try { data = await resp.json(); } catch (e) { /* no body */ }
+  if (!resp.ok) {
+    const msg = (data && data.detail) ? data.detail : ("Request failed (" + resp.status + ")");
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/* --- views --- */
+function showLogin(msg) {
+  $("app").hidden = true;
+  closeDrawer();
+  $("login-view").hidden = false;
+  $("login-error").textContent = msg || "";
+}
+function showApp() {
+  $("login-view").hidden = true;
+  $("app").hidden = false;
+  loadOverview();
+  loadUsers();
+}
+
+function switchTab(name) {
+  $("nav-overview").classList.toggle("active", name === "overview");
+  $("nav-users").classList.toggle("active", name === "users");
+  $("nav-overview").setAttribute("aria-current", name === "overview" ? "page" : "false");
+  $("nav-users").setAttribute("aria-current", name === "users" ? "page" : "false");
+  $("tab-overview").hidden = name !== "overview";
+  $("tab-users").hidden = name !== "users";
+}
+
+/* --- delta chips (period-over-period) --- */
+function deltaChip(current, previous, suffix) {
+  if (previous === null || previous === undefined) return el("span");
+  if (previous === 0) {
+    if (!current) return el("span", "delta flat", "—");
+    return el("span", "delta up", "new");
+  }
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct > 0) return el("span", "delta up", "▲ " + pct + "%" + (suffix || ""));
+  if (pct < 0) return el("span", "delta down", "▼ " + Math.abs(pct) + "%" + (suffix || ""));
+  return el("span", "delta flat", "0%" + (suffix || ""));
+}
+
+/* --- overview --- */
+async function loadOverview() {
+  try {
+    const [o, ts] = await Promise.all([api("/admin/v1/overview"), api("/admin/v1/timeseries?days=30")]);
+    $("overview-error").hidden = true;
+    renderCards(o);
+    const allZero = (arr) => arr.every(v => !v);
+    barChart($("chart-signups"), ts.days, ts.signups, "#0b6e4f");
+    if (allZero(ts.signups)) $("chart-signups").appendChild(el("div", "chart-empty", "No signups in this window."));
+    comboChart($("chart-usage"), ts.days, ts.messages, ts.active_users);
+    if (allZero(ts.messages) && allZero(ts.active_users)) {
+      $("chart-usage").appendChild(el("div", "chart-empty", "No chat usage yet — daily history accumulates from here on."));
+    }
+    renderAdoption(o);
+    renderAudience(o);
+    renderTopSymbols(o.top_symbols || []);
+    renderSystem(o);
+    $("overview-updated").textContent = "Updated " + new Date().toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit"});
+  } catch (e) {
+    if (e.message !== "unauthorized") {
+      const banner = $("overview-error");
+      banner.textContent = "Could not load metrics: " + e.message;
+      banner.hidden = false;
+    }
+  }
+}
+
+function renderCards(o) {
+  const defs = [
+    { label: "Total users", value: o.users.total, hint: o.users.new_30d + " new in 30d" },
+    { label: "New users (7d)", value: o.users.new_7d, delta: [o.users.new_7d, o.users.new_prev_7d, " vs prev 7d"], hint: "vs " + fmt(o.users.new_prev_7d) + " previous 7d" },
+    { label: "Active today (DAU)", value: o.activity.dau_today, delta: [o.activity.dau_today, o.activity.dau_yesterday, " vs yest."], hint: fmt(o.activity.dau_yesterday) + " yesterday" },
+    { label: "Active (7d)", value: o.activity.wau_7d, delta: [o.activity.wau_7d, o.activity.wau_prev_7d, " vs prev 7d"], hint: "distinct chat users" },
+    { label: "Active (30d)", value: o.activity.mau_30d, hint: "distinct chat users" },
+    { label: "Messages (7d)", value: o.activity.messages_7d, delta: [o.activity.messages_7d, o.activity.messages_prev_7d, " vs prev 7d"], hint: fmt(o.activity.messages_30d) + " in 30d" },
+    { label: "Live sessions", value: o.users.live_sessions, hint: "valid login sessions" },
+    { label: "Conversations (24h)", value: o.conversations.active_24h, hint: fmt(o.conversations.total_threads) + " threads kept" },
+  ];
+  const wrap = $("stat-cards");
+  wrap.textContent = "";
+  for (const def of defs) {
+    const card = el("div", "card");
+    card.appendChild(el("h3", null, def.label));
+    const row = el("div");
+    row.appendChild(el("span", "value", fmt(def.value)));
+    if (def.delta) row.appendChild(deltaChip(def.delta[0], def.delta[1], def.delta[2]));
+    card.appendChild(row);
+    card.appendChild(el("div", "hint", def.hint));
+    wrap.appendChild(card);
+  }
+}
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs) {
+  const node = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  return node;
+}
+
+function barChart(container, labels, values, color) {
+  container.textContent = "";
+  const W = Math.max(420, container.clientWidth || 560), H = 200;
+  const padL = 34, padR = 6, padT = 10, padB = 26;
+  const maxV = Math.max(1, ...values);
+  const n = labels.length;
+  const step = (W - padL - padR) / n;
+  const barW = Math.max(2, step - 3);
+  const svg = svgEl("svg", { "class": "chart", "viewBox": "0 0 " + W + " " + H });
+  for (const frac of [0, 0.5, 1]) {
+    const y = padT + (1 - frac) * (H - padT - padB);
+    svg.appendChild(svgEl("line", { x1: padL, x2: W - padR, y1: y, y2: y, stroke: "#e3eae6" }));
+    const txt = svgEl("text", { x: 2, y: y + 3, "font-size": 9, fill: "#8a96a3" });
+    txt.textContent = Math.round(maxV * frac);
+    svg.appendChild(txt);
+  }
+  const labelEvery = Math.ceil(n / 10);
+  for (let i = 0; i < n; i++) {
+    const v = values[i] || 0;
+    const h = (v / maxV) * (H - padT - padB);
+    const rect = svgEl("rect", {
+      x: padL + i * step + 1.5, y: H - padB - h, width: barW,
+      height: Math.max(h, v > 0 ? 1.5 : 0), fill: color, rx: 1.5,
+    });
+    const title = svgEl("title", {});
+    title.textContent = labels[i] + ": " + v;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+    if (i % labelEvery === 0) {
+      const txt = svgEl("text", { x: padL + i * step + 1, y: H - 8, "font-size": 9, fill: "#8a96a3" });
+      txt.textContent = labels[i].slice(5);
+      svg.appendChild(txt);
+    }
+  }
+  container.appendChild(svg);
+}
+
+function comboChart(container, labels, barValues, lineValues) {
+  container.textContent = "";
+  const W = Math.max(420, container.clientWidth || 560), H = 210;
+  const padL = 34, padR = 34, padT = 10, padB = 26;
+  const maxBar = Math.max(1, ...barValues);
+  const maxLine = Math.max(1, ...lineValues);
+  const n = labels.length;
+  const step = (W - padL - padR) / n;
+  const barW = Math.max(2, step - 3);
+  const innerH = H - padT - padB;
+  const svg = svgEl("svg", { "class": "chart", "viewBox": "0 0 " + W + " " + H });
+
+  for (const frac of [0, 0.5, 1]) {
+    const y = padT + (1 - frac) * innerH;
+    svg.appendChild(svgEl("line", { x1: padL, x2: W - padR, y1: y, y2: y, stroke: "#e3eae6" }));
+    const left = svgEl("text", { x: 2, y: y + 3, "font-size": 9, fill: "#8a96a3" });
+    left.textContent = Math.round(maxBar * frac);
+    svg.appendChild(left);
+    const right = svgEl("text", { x: W - padR + 4, y: y + 3, "font-size": 9, fill: "#2563a8" });
+    right.textContent = Math.round(maxLine * frac);
+    svg.appendChild(right);
+  }
+  const labelEvery = Math.ceil(n / 10);
+  const points = [];
+  for (let i = 0; i < n; i++) {
+    const v = barValues[i] || 0;
+    const h = (v / maxBar) * innerH;
+    const rect = svgEl("rect", {
+      x: padL + i * step + 1.5, y: H - padB - h, width: barW,
+      height: Math.max(h, v > 0 ? 1.5 : 0), fill: "#0b6e4f", rx: 1.5, opacity: 0.85,
+    });
+    const title = svgEl("title", {});
+    title.textContent = labels[i] + ": " + v + " messages, " + (lineValues[i] || 0) + " active";
+    rect.appendChild(title);
+    svg.appendChild(rect);
+    points.push((padL + i * step + 1.5 + barW / 2) + "," + (H - padB - ((lineValues[i] || 0) / maxLine) * innerH));
+    if (i % labelEvery === 0) {
+      const txt = svgEl("text", { x: padL + i * step + 1, y: H - 8, "font-size": 9, fill: "#8a96a3" });
+      txt.textContent = labels[i].slice(5);
+      svg.appendChild(txt);
+    }
+  }
+  svg.appendChild(svgEl("polyline", {
+    points: points.join(" "), fill: "none", stroke: "#2563a8", "stroke-width": 2, "stroke-linejoin": "round",
+  }));
+  container.appendChild(svg);
+}
+
+/* tiny 14-day activity strip in the user drawer */
+function sparkChart(container, daily) {
+  container.textContent = "";
+  if (!daily || !daily.length) return;
+  const rows = daily.slice(-14);
+  const W = 380, H = 54, padB = 12;
+  const maxV = Math.max(1, ...rows.map(r => r.count));
+  const step = W / rows.length;
+  const svg = svgEl("svg", { "class": "chart", "viewBox": "0 0 " + W + " " + H, style: "min-width:0" });
+  rows.forEach((r, i) => {
+    const h = (r.count / maxV) * (H - padB);
+    const rect = svgEl("rect", {
+      x: i * step + 1, y: H - padB - h, width: Math.max(2, step - 3),
+      height: Math.max(h, r.count > 0 ? 1.5 : 0), fill: "#0b6e4f", rx: 1.5,
+    });
+    const title = svgEl("title", {});
+    title.textContent = r.day + ": " + r.count + " messages";
+    rect.appendChild(title);
+    svg.appendChild(rect);
+  });
+  const lbl = svgEl("text", { x: 0, y: H - 1, "font-size": 9, fill: "#8a96a3" });
+  lbl.textContent = rows[0].day.slice(5) + " → " + rows[rows.length - 1].day.slice(5);
+  svg.appendChild(lbl);
+  container.appendChild(svg);
+}
+
+function barRow(label, value, max, note, color) {
+  const row = el("div", "bar-row");
+  row.appendChild(el("span", "label", label));
+  const track = el("div", "track");
+  const fill = el("div", "fill" + (color ? " " + color : ""));
+  fill.style.width = Math.min(100, Math.max(1.5, Math.round(100 * value / Math.max(1, max)))) + "%";
+  track.appendChild(fill);
+  row.appendChild(track);
+  row.appendChild(el("span", "num", note));
+  return row;
+}
+
+function renderAdoption(o) {
+  const total = Math.max(1, o.users.total);
+  const f = o.features;
+  const items = [
+    ["Portfolio", f.portfolio_users],
+    ["Watchlist", f.watchlist_users],
+    ["Price alerts", f.alert_users],
+    ["Digest", f.digest_users],
+  ];
+  const wrap = $("adoption");
+  wrap.textContent = "";
+  for (const [label, n] of items) {
+    wrap.appendChild(barRow(label, n, total, fmt(n) + " · " + Math.round(100 * n / total) + "%"));
+  }
+}
+
+function renderAudience(o) {
+  const wrap = $("audience");
+  wrap.textContent = "";
+  const devTotal = Math.max(1, o.devices.total || 0);
+  wrap.appendChild(el("h3", null, "Devices (push-registered)"));
+  for (const p of ["android", "ios"]) {
+    wrap.appendChild(barRow(p, o.devices[p] || 0, devTotal, fmt(o.devices[p] || 0), "blue"));
+  }
+  const idTotal = Math.max(1, o.users.total);
+  wrap.appendChild(el("h3", null, "Login identifier"));
+  wrap.appendChild(barRow("Email", o.users.with_email, idTotal, fmt(o.users.with_email) + " · " + Math.round(100 * o.users.with_email / idTotal) + "%"));
+  wrap.appendChild(barRow("Phone", o.users.with_phone, idTotal, fmt(o.users.with_phone) + " · " + Math.round(100 * o.users.with_phone / idTotal) + "%"));
+  const h = el("p", "hint");
+  h.style.cssText = "color:var(--muted);font-size:.8rem;margin:10px 0 0";
+  h.textContent = fmt(o.users.with_password) + " accounts have set a password · " + fmt(o.users.deactivated) + " deactivated";
+  wrap.appendChild(h);
+}
+
+function renderTopSymbols(list) {
+  const wrap = $("top-symbols");
+  wrap.textContent = "";
+  if (!list.length) { wrap.appendChild(el("div", "empty", "No watchlist data yet.")); return; }
+  const max = Math.max(...list.map(s => s.watchers));
+  for (const s of list) {
+    wrap.appendChild(barRow(s.symbol, s.watchers, max, fmt(s.watchers)));
+  }
+}
+
+function renderSystem(o) {
+  const kv = [
+    ["Database", o.system.db],
+    ["Market snapshot", o.system.market_snapshot_day || "no data yet"],
+    ["AI predictions", o.system.predictions_day || "no data yet"],
+    ["Scores", o.system.scores_day || "no data yet"],
+    ["Daily chat quota", o.system.daily_quota > 0 ? o.system.daily_quota + " msg/user/day" : "unlimited"],
+    ["Stickiness (DAU/WAU)", o.activity.stickiness !== null ? Math.round(o.activity.stickiness * 100) + "%" : "—"],
+  ];
+  const wrap = $("system");
+  wrap.textContent = "";
+  const dl = el("dl", "kv");
+  dl.style.marginBottom = "0";
+  for (const [k, v] of kv) {
+    dl.appendChild(el("dt", null, k));
+    dl.appendChild(el("dd", null, v));
+  }
+  wrap.appendChild(dl);
+}
+
+/* --- users --- */
+const usersState = { q: "", page: 1, pageSize: 20, total: 0, status: "all", sort: "created_at" };
+let searchTimer = null;
+
+async function loadUsers() {
+  try {
+    const params = new URLSearchParams({
+      page: usersState.page, page_size: usersState.pageSize,
+      status: usersState.status, sort: usersState.sort,
+    });
+    if (usersState.q) params.set("q", usersState.q);
+    const data = await api("/admin/v1/users?" + params.toString());
+    $("users-error").hidden = true;
+    usersState.total = data.total;
+    renderUsers(data);
+  } catch (e) {
+    if (e.message !== "unauthorized") {
+      const banner = $("users-error");
+      banner.textContent = "Could not load users: " + e.message;
+      banner.hidden = false;
+    }
+  }
+}
+
+function renderUsers(data) {
+  const tbody = $("users-tbody");
+  tbody.textContent = "";
+  $("users-empty").hidden = data.users.length > 0;
+  $("users-count").textContent = fmt(data.total) + " user" + (data.total === 1 ? "" : "s");
+  for (const u of data.users) {
+    const tr = el("tr");
+    tr.dataset.uid = u.id;
+
+    const tdUser = el("td");
+    tdUser.appendChild(el("div", "u-name", u.display_name || u.email || u.phone || "(no name)"));
+    const sub = el("div", "u-id2");
+    sub.textContent = [u.email, u.phone].filter(Boolean).join(" · ") || ("id " + u.principal_id);
+    tdUser.appendChild(sub);
+    tr.appendChild(tdUser);
+
+    tr.appendChild(el("td", null, fmtDate(u.created_at)));
+    tr.appendChild(el("td", null, fmtDay(u.last_active_day)));
+    tr.appendChild(el("td", null, fmt(u.messages_30d)));
+    tr.appendChild(el("td", null, fmt(u.quota_used_today)));
+    tr.appendChild(el("td", null, u.devices ? fmt(u.devices) : "0"));
+
+    const tdStatus = el("td");
+    tdStatus.appendChild(el("span", "pill " + (u.is_active ? "on" : "off"), u.is_active ? "active" : "disabled"));
+    tr.appendChild(tdStatus);
+
+    tr.addEventListener("click", () => openUser(u.id));
+    tbody.appendChild(tr);
+  }
+  const pages = Math.max(1, Math.ceil(data.total / data.page_size));
+  $("page-info").textContent = "Page " + data.page + " / " + pages;
+  $("page-prev").disabled = data.page <= 1;
+  $("page-next").disabled = data.page >= pages;
+}
+
+/* --- user drawer --- */
+function openDrawer() { $("drawer-backdrop").hidden = false; $("drawer").hidden = false; }
+function closeDrawer() { $("drawer-backdrop").hidden = true; $("drawer").hidden = true; }
+
+async function openUser(uid) {
+  openDrawer();
+  const c = $("drawer-content");
+  c.textContent = "";
+  c.appendChild(el("div", "loading", "Loading…"));
+  let d;
+  try {
+    d = await api("/admin/v1/users/" + encodeURIComponent(uid));
+  } catch (e) {
+    c.textContent = "";
+    c.appendChild(el("div", "empty", e.message));
+    return;
+  }
+  renderUserDetail(d);
+}
+
+function kvList(pairs) {
+  const dl = el("dl", "kv");
+  for (const [k, v] of pairs) {
+    dl.appendChild(el("dt", null, k));
+    dl.appendChild(el("dd", null, v));
+  }
+  return dl;
+}
+
+function renderUserDetail(d) {
+  const c = $("drawer-content");
+  c.textContent = "";
+
+  c.appendChild(el("h2", null, d.display_name || d.email || d.phone || "(no name)"));
+  c.appendChild(el("div", "dsub", [d.email, d.phone].filter(Boolean).join(" · ") || "no identifier"));
+
+  const status = el("div");
+  status.style.marginBottom = "14px";
+  status.appendChild(el("span", "pill " + (d.is_active ? "on" : "off"), d.is_active ? "active" : "disabled"));
+  if (d.quota_exempt) status.appendChild(el("span", "pill dev", "quota-exempt"));
+  c.appendChild(status);
+
+  if (!d.is_active) {
+    c.appendChild(el("div", "notice warn", "This account is deactivated: sessions are revoked and login is blocked."));
+  }
+
+  c.appendChild(kvList([
+    ["Joined", fmtDate(d.created_at)],
+    ["User id", d.id],
+    ["Principal id", String(d.principal_id)],
+    ["Password set", d.has_password ? "yes" : "no"],
+    ["Live sessions", fmt(d.sessions_live)],
+    ["Devices", d.devices.length ? d.devices.map(x => x.platform).join(", ") : "none"],
+  ]));
+
+  c.appendChild(el("h3", null, "Chat usage"));
+  c.appendChild(kvList([
+    ["Today", fmt(d.usage.today) + " messages"],
+    ["Last 7 days", fmt(d.usage.last_7d)],
+    ["Last 30 days", fmt(d.usage.last_30d)],
+    ["Last active", fmtDay(d.usage.last_active_day)],
+    ["Conversations", fmt(d.threads.count) + (d.threads.last_seen ? " · last " + fmtTs(d.threads.last_seen) : "")],
+  ]));
+  if (d.usage.daily && d.usage.daily.length) {
+    const spark = el("div");
+    spark.style.margin = "4px 0 10px";
+    sparkChart(spark, d.usage.daily);
+    c.appendChild(spark);
+  }
+
+  c.appendChild(el("h3", null, "Features"));
+  c.appendChild(kvList([
+    ["Portfolio", d.portfolio.positions + " positions · " + d.portfolio.lots + " lots" + (d.portfolio.imports ? " · " + d.portfolio.imports + " imports" : "")],
+    ["Watchlist", fmt(d.watchlist) + " symbols"],
+    ["Price alerts", fmt(d.alerts.total) + " (" + d.alerts.pending + " pending)"],
+    ["Digest", d.digest && d.digest.enabled ? d.digest.frequency : "off"],
+  ]));
+
+  c.appendChild(el("h3", null, "Actions"));
+  const actions = el("div", "action-row");
+
+  const toggleBtn = el("button", "btn small " + (d.is_active ? "ghost" : ""), d.is_active ? "Deactivate account" : "Reactivate account");
+  toggleBtn.type = "button";
+  toggleBtn.addEventListener("click", async () => {
+    const verb = d.is_active ? "deactivate" : "reactivate";
+    if (!confirm("Really " + verb + " " + (d.email || d.phone || d.id) + "?")) return;
+    await runAction(
+      "/admin/v1/users/" + d.id + (d.is_active ? "/deactivate" : "/activate"),
+      { method: "POST" }, d.id, "Account " + verb + "d."
+    );
+  });
+  actions.appendChild(toggleBtn);
+
+  const quotaBtn = el("button", "btn small ghost",
+    d.usage.today > 0 ? "Reset today's quota (" + d.usage.today + ")" : "Reset today's quota");
+  quotaBtn.type = "button";
+  quotaBtn.disabled = d.usage.today === 0;
+  quotaBtn.addEventListener("click", async () => {
+    await runAction("/admin/v1/users/" + d.id + "/reset-quota", { method: "POST" }, d.id, "Quota reset.");
+  });
+  actions.appendChild(quotaBtn);
+
+  const delBtn = el("button", "btn small danger", "Delete permanently");
+  delBtn.type = "button";
+  delBtn.addEventListener("click", async () => {
+    const label = d.email || d.phone || d.id;
+    if (!confirm("DELETE " + label + "?\n\nThis permanently erases the account, portfolio, watchlist, alerts, sessions and conversation history. This cannot be undone.")) return;
+    if (!confirm("Confirm permanent deletion of " + label + ".")) return;
+    await runAction("/admin/v1/users/" + d.id, { method: "DELETE" }, null, "Account deleted.");
+  });
+  actions.appendChild(delBtn);
+
+  c.appendChild(actions);
+}
+
+async function runAction(path, opts, reloadUid, successMsg) {
+  try {
+    await api(path, opts);
+    toast(successMsg || "Done.", "ok");
+    if (reloadUid) { openUser(reloadUid); } else { closeDrawer(); }
+    loadUsers();
+    loadOverview();
+  } catch (e) {
+    if (e.message !== "unauthorized") toast(e.message, "error");
+  }
+}
+
+/* --- wiring --- */
+$("login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("login-error").textContent = "";
+  $("login-btn").disabled = true;
+  try {
+    const resp = await fetch("/admin/v1/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("login-username").value, password: $("login-password").value }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      $("login-error").textContent = data.detail || "Sign-in failed.";
+      return;
+    }
+    setSession(data.token);
+    showApp();
+  } catch (e) {
+    $("login-error").textContent = "Network error — is the API reachable?";
+  } finally {
+    $("login-btn").disabled = false;
+  }
+});
+$("logout-btn").addEventListener("click", () => { clearSession(); showLogin(""); });
+$("nav-overview").addEventListener("click", () => switchTab("overview"));
+$("nav-users").addEventListener("click", () => switchTab("users"));
+$("refresh-overview").addEventListener("click", loadOverview);
+$("refresh-users").addEventListener("click", loadUsers);
+$("drawer-close").addEventListener("click", closeDrawer);
+$("drawer-backdrop").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeDrawer(); });
+$("user-search").addEventListener("input", (ev) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    usersState.q = ev.target.value.trim();
+    usersState.page = 1;
+    loadUsers();
+  }, 300);
+});
+$("user-status").addEventListener("change", (ev) => {
+  usersState.status = ev.target.value;
+  usersState.page = 1;
+  loadUsers();
+});
+$("user-sort").addEventListener("change", (ev) => {
+  usersState.sort = ev.target.value;
+  usersState.page = 1;
+  loadUsers();
+});
+$("page-prev").addEventListener("click", () => { usersState.page = Math.max(1, usersState.page - 1); loadUsers(); });
+$("page-next").addEventListener("click", () => { usersState.page += 1; loadUsers(); });
+
+/* plain-HTTP warning (localhost is fine) */
+(function () {
+  const host = location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+  if (location.protocol === "http:" && !isLocal) {
+    $("http-warning").hidden = false;
+  }
+})();
+
+if (token()) { showApp(); } else { showLogin(""); }
+</script>
+</body>
+</html>

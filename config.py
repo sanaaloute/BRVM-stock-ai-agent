@@ -322,3 +322,13 @@ MOBILE_APP_WHATS_NEW = os.getenv("MOBILE_APP_WHATS_NEW", "").strip()
 # sector peers) via Tavily (~150 extract credits/week). Set false to save quota.
 
 SIKA_TABS_ENABLED = os.getenv("SIKA_TABS_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+
+# --- Admin dashboard (GET /admin) ---
+# Lite ops dashboard (metrics + user management). Login uses these env
+# credentials; sessions are short-lived tokens signed with JWT_SECRET, so both
+# ADMIN_PASSWORD and JWT_SECRET must be set for the dashboard to be enabled
+# (endpoints return 503 otherwise). Generate: openssl rand -hex 16
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+ADMIN_TOKEN_TTL_SECONDS = int(os.getenv("ADMIN_TOKEN_TTL_SECONDS", str(12 * 3600)).strip() or str(12 * 3600))

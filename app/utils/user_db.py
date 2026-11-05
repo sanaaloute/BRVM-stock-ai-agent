@@ -91,15 +91,18 @@ def get_daily_usage(user_id: str) -> int:
 
 
 def increment_daily_usage(user_id: str) -> int:
-    """Count one more request for today; return the new count. Prunes old days."""
+    """Count one more request for today; return the new count. Prunes old days
+    (90-day retention: recent history feeds the admin dashboard's DAU/messages
+    time series)."""
     _ensure_ready()
     today = _today_utc()
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=90)).isoformat()
     engine = db_engine.get_engine()
     with db_engine.session_scope() as s:
         value = s.execute(
             _usage_increment_stmt(engine.dialect.name, str(user_id), today)
         ).scalar_one_or_none()
-        s.execute(delete(models.UsageDaily).where(models.UsageDaily.day < today))
+        s.execute(delete(models.UsageDaily).where(models.UsageDaily.day < cutoff))
         return int(value) if value is not None else 0
 
 
