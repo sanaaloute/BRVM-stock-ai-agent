@@ -56,6 +56,7 @@ def _pin_env():
     config.ADMIN_USERNAME = ADMIN_USERNAME
     config.ADMIN_PASSWORD = ADMIN_PASSWORD
     admin_mod._login_hits.clear()
+    client.cookies.clear()  # admin session cookie must not leak between tests
     try:
         yield
     finally:
@@ -89,9 +90,67 @@ def _uh(tokens: dict) -> dict:
 # --- Auth -----------------------------------------------------------------------
 
 def test_dashboard_page_served():
-    r = client.get("/admin")
+    r = client.get("/admin/dashboard")
     assert r.status_code == 200
     assert "Kora Bourse" in r.text
+    # /admin redirects to the dashboard
+    r = client.get("/admin", follow_redirects=False)
+    assert r.status_code == 308 and r.headers["location"] == "/admin/dashboard"
+
+
+def test_public_docs_disabled():
+    """The FastAPI default docs used to expose the whole API surface publicly."""
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
+def test_admin_docs_require_auth():
+    assert client.get("/admin/docs").status_code == 401
+    assert client.get("/admin/openapi.json").status_code == 401
+    assert client.get("/admin/docs-assets/swagger-ui-bundle.js").status_code == 401
+    assert client.get("/admin/docs-assets/swagger-ui.css").status_code == 401
+    h = _ah()
+    r = client.get("/admin/docs", headers=h)
+    assert r.status_code == 200 and "swagger" in r.text.lower()
+    # assets are vendored locally — no CDN dependency
+    assert "/admin/docs-assets/swagger-ui-bundle.js" in r.text
+    assert "cdn.jsdelivr.net" not in r.text
+    assert "cdn" not in r.headers.get("content-security-policy", "")
+    assert client.get("/admin/docs-assets/swagger-ui-bundle.js", headers=h).status_code == 200
+    assert client.get("/admin/docs-assets/swagger-ui.css", headers=h).status_code == 200
+    r = client.get("/admin/openapi.json", headers=h)
+    assert r.status_code == 200
+    assert "/chat" in r.json()["paths"]
+
+
+def test_login_sets_cookie_and_cookie_grants_access():
+    # bearer flow still works without any cookie
+    assert client.get("/admin/v1/overview").status_code == 401
+
+    r = client.post("/admin/v1/login", json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200
+    cookie = client.cookies.get("kb_admin_session")
+    assert cookie, "login must set the admin session cookie"
+
+    # the cookie alone (browser navigation) grants access — no bearer header
+    assert client.get("/admin/v1/session").status_code == 200
+    assert client.get("/admin/docs").status_code == 200
+    assert client.get("/admin/v1/overview").status_code == 200
+
+    # logout drops the cookie → back to 401
+    assert client.post("/admin/v1/logout").status_code == 200
+    assert client.cookies.get("kb_admin_session") is None
+    assert client.get("/admin/v1/overview").status_code == 401
+
+
+def test_admin_page_has_security_headers():
+    r = client.get("/admin/dashboard")
+    assert r.status_code == 200
+    csp = r.headers.get("content-security-policy", "")
+    assert "default-src 'none'" in csp
+    assert r.headers.get("x-frame-options") == "DENY"
+    assert r.headers.get("referrer-policy") == "no-referrer"
 
 
 def test_admin_endpoints_require_token():
@@ -324,15 +383,6 @@ def test_users_sort_by_messages():
 def test_users_rejects_bad_params():
     assert client.get("/admin/v1/users?status=bogus", headers=_ah()).status_code == 422
     assert client.get("/admin/v1/users?sort=bogus", headers=_ah()).status_code == 422
-
-
-def test_admin_page_has_security_headers():
-    r = client.get("/admin")
-    assert r.status_code == 200
-    csp = r.headers.get("content-security-policy", "")
-    assert "default-src 'none'" in csp
-    assert r.headers.get("x-frame-options") == "DENY"
-    assert r.headers.get("referrer-policy") == "no-referrer"
 
 
 def test_admin_login_rate_limited_per_account():

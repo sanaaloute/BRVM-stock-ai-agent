@@ -645,7 +645,11 @@ async def _lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="BRVM Chat API", version="1.0", lifespan=_lifespan)
+app = FastAPI(title="BRVM Chat API", version="1.0", lifespan=_lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+from app.api.https import install as install_https  # noqa: E402
+
+install_https(app)
 app.include_router(router)
 
 # Mobile app (Flutter) API: JWT auth + market/portfolio/chat endpoints.

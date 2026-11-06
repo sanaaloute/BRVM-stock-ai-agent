@@ -1,6 +1,8 @@
-"""Lite admin dashboard: GET /admin serves the page, /admin/v1/* is the JSON
-API behind env-credential sessions (app.services.admin_service). No admin role
-exists in the DB — access is gated solely by ADMIN_USERNAME/ADMIN_PASSWORD.
+"""Admin area: /admin/dashboard (metrics + user management page), /admin/docs
+(developer docs), /admin/v1/* (JSON API). Exactly one admin exists — the
+ADMIN_USERNAME/ADMIN_PASSWORD env pair; sessions are tokens signed with
+JWT_SECRET, delivered as an HttpOnly SameSite=Strict cookie at login
+(the /admin/v1/* API also accepts the raw token as a Bearer header).
 """
 from __future__ import annotations
 
@@ -10,8 +12,8 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -22,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["admin"])
 
 _DASHBOARD_HTML = Path(__file__).resolve().parent.parent / "admin" / "dashboard.html"
+
+# Admin session cookie: HttpOnly (JS never reads it — XSS can't steal it) and
+# SameSite=Strict (never sent cross-site — kills CSRF on the admin actions).
+_COOKIE_NAME = "kb_admin_session"
 
 # --- Login brute-force protection (in-memory, per-process; same pattern as
 # the /chat rate limiter) ---
@@ -56,15 +62,25 @@ def _login_rate_limited(ip: str, username: str) -> bool:
     return limited or ip_limited
 
 
+def _extract_token(request: Request) -> str | None:
+    """Session token from the Bearer header (API clients) or the login cookie
+    (browser pages: /admin/dashboard, /admin/docs)."""
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and token.strip():
+        return token.strip()
+    cookie = request.cookies.get(_COOKIE_NAME)
+    return cookie.strip() if cookie else None
+
+
 def require_admin(request: Request) -> None:
-    """Gate every /admin/v1/* endpoint on a valid admin session token."""
+    """Gate every admin endpoint/page on a valid session token."""
     if not admin_service.admin_enabled():
         raise HTTPException(
             status_code=503,
             detail="Admin dashboard is not configured (set ADMIN_PASSWORD and JWT_SECRET).",
         )
-    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    if scheme.lower() != "bearer" or not admin_service.authenticate_token(token):
+    token = _extract_token(request)
+    if not token or not admin_service.authenticate_token(token):
         raise HTTPException(status_code=401, detail="Admin authentication required.")
 
 
@@ -77,7 +93,7 @@ class LoginBody(BaseModel):
 
 
 @router.post("/admin/v1/login")
-def admin_login(body: LoginBody, request: Request) -> dict:
+def admin_login(body: LoginBody, request: Request, response: Response) -> dict:
     if not admin_service.admin_enabled():
         raise HTTPException(
             status_code=503,
@@ -90,7 +106,31 @@ def admin_login(body: LoginBody, request: Request) -> dict:
     session = admin_service.login(body.username, body.password)
     if session is None:
         raise HTTPException(status_code=401, detail="Invalid credentials.")
+    # Browser session: the same token rides an HttpOnly cookie so the dashboard
+    # and docs pages work across tabs/navigation without JS token handling.
+    response.set_cookie(
+        _COOKIE_NAME,
+        session["token"],
+        max_age=config.ADMIN_TOKEN_TTL_SECONDS,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
     return session
+
+
+@router.post("/admin/v1/logout")
+def admin_logout(response: Response) -> dict:
+    """Drop the browser session cookie (idempotent; no auth needed)."""
+    response.delete_cookie(_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@router.get("/admin/v1/session", dependencies=[AdminDep])
+def admin_session() -> dict:
+    """Cheap auth probe used by the dashboard page on load."""
+    return {"ok": True}
 
 
 @router.get("/admin/v1/overview", dependencies=[AdminDep])
@@ -164,8 +204,28 @@ _PAGE_HEADERS = {
     "Cache-Control": "no-store",
 }
 
+# The docs page is Swagger UI. The assets are vendored under app/admin/docs-assets
+# (the CDN is unreliable on some networks and the page must work anywhere the
+# dashboard works); the spec and any "try it" calls go to same origin.
+_DOCS_ASSETS = _DASHBOARD_HTML.parent / "docs-assets"
+_DOCS_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'none'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; "
+        "img-src data: 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
 
-@router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+
+@router.get("/admin", include_in_schema=False)
+def admin_root() -> RedirectResponse:
+    return RedirectResponse(url="/admin/dashboard", status_code=308)
+
+
+@router.get("/admin/dashboard", response_class=HTMLResponse, include_in_schema=False)
 def admin_page() -> HTMLResponse:
     """The dashboard page (public HTML; all data calls require a session)."""
     try:
@@ -174,3 +234,39 @@ def admin_page() -> HTMLResponse:
         logger.error("Admin dashboard page missing: %s", _DASHBOARD_HTML)
         raise HTTPException(status_code=500, detail="Dashboard page not installed.")
     return HTMLResponse(content=html, headers=_PAGE_HEADERS)
+
+
+@router.get("/admin/docs-assets/swagger-ui-bundle.js", dependencies=[AdminDep], include_in_schema=False)
+def admin_docs_js() -> FileResponse:
+    return FileResponse(_DOCS_ASSETS / "swagger-ui-bundle.js", media_type="text/javascript",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/admin/docs-assets/swagger-ui.css", dependencies=[AdminDep], include_in_schema=False)
+def admin_docs_css() -> FileResponse:
+    return FileResponse(_DOCS_ASSETS / "swagger-ui.css", media_type="text/css",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/admin/docs", dependencies=[AdminDep], include_in_schema=False)
+def admin_docs() -> HTMLResponse:
+    """Developer API docs (Swagger UI). The public /docs is disabled — these
+    docs exist only behind the admin session."""
+    from fastapi.openapi.docs import get_swagger_ui_html
+
+    response = get_swagger_ui_html(
+        openapi_url="/admin/openapi.json",
+        title="Kora Bourse — API docs",
+        swagger_js_url="/admin/docs-assets/swagger-ui-bundle.js",
+        swagger_css_url="/admin/docs-assets/swagger-ui.css",
+        swagger_favicon_url="",
+        init_oauth=None,
+    )
+    for key, value in _DOCS_HEADERS.items():
+        response.headers[key] = value
+    return response
+
+
+@router.get("/admin/openapi.json", dependencies=[AdminDep], include_in_schema=False)
+def admin_openapi(request: Request) -> JSONResponse:
+    return JSONResponse(request.app.openapi())

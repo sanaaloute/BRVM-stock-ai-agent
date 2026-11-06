@@ -109,6 +109,27 @@ def test_dev_mode_when_no_key():
     config.API_SECRET_KEY = SECRET  # restore
 
 
+# --- HTTPS enforcement (X-Forwarded-Proto from the tunnel ingress) -------------
+
+def test_http_forwarded_request_redirects_to_https():
+    r = client.get("/health", headers={"X-Forwarded-Proto": "http"}, follow_redirects=False)
+    assert r.status_code == 308
+    assert r.headers["location"].startswith("https://")
+
+
+def test_https_forwarded_request_gets_hsts():
+    r = client.get("/health", headers={"X-Forwarded-Proto": "https"})
+    assert r.status_code == 200
+    assert r.headers.get("strict-transport-security", "").startswith("max-age=")
+
+
+def test_direct_request_without_forwarded_proto_is_untouched():
+    """Local dev / container healthchecks speak plain HTTP with no ingress."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert "strict-transport-security" not in r.headers
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

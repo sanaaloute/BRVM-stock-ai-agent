@@ -132,9 +132,9 @@ verified that users can log in and their portfolios are present.
 
 ### Admin dashboard
 
-The API serves an admin dashboard at `/admin` (e.g.
-`https://kbourse.neobytech.net/admin` in production). Access requires an
-administrator login.
+The API serves an admin dashboard at `/admin/dashboard` (e.g.
+`https://kbourse.neobytech.net/admin/dashboard` in production). Access requires
+an administrator login.
 
 ## Mobile app
 

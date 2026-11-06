@@ -24,11 +24,11 @@
            align-items: center; gap: 18px; height: 56px; position: sticky; top: 0; z-index: 10; }
   header .brand { font-weight: 700; font-size: 1.05rem; white-space: nowrap; }
   header .brand span { opacity: .75; font-weight: 400; }
-  header nav { display: flex; gap: 4px; flex: 1; }
-  header nav button { background: none; border: none; color: #d8eae2; padding: 8px 14px;
-                      border-radius: 8px; font-size: .95rem; }
+  header nav { display: flex; gap: 4px; flex: 1; align-items: center; }
+  header nav button, header nav a.docs-link { background: none; border: none; color: #d8eae2; padding: 8px 14px;
+                      border-radius: 8px; font-size: .95rem; text-decoration: none; }
   header nav button.active { background: rgba(255,255,255,.16); color: #fff; font-weight: 600; }
-  header nav button:hover { background: rgba(255,255,255,.10); }
+  header nav button:hover, header nav a.docs-link:hover { background: rgba(255,255,255,.10); }
   header .logout { background: none; border: 1px solid rgba(255,255,255,.4); color: #fff;
                    padding: 6px 12px; border-radius: 8px; font-size: .85rem; }
   header .logout:hover { background: rgba(255,255,255,.12); }
@@ -182,6 +182,7 @@
     <nav>
       <button id="nav-overview" class="active" type="button">Overview</button>
       <button id="nav-users" type="button">Users</button>
+      <a class="docs-link" href="/admin/docs" target="_blank" rel="noopener noreferrer">API docs ↗</a>
     </nav>
     <button class="logout" id="logout-btn" type="button">Log out</button>
   </header>
@@ -288,7 +289,6 @@
 
 <script>
 "use strict";
-const TOKEN_KEY = "kb_admin_token";
 const $ = (id) => document.getElementById(id);
 
 function el(tag, cls, text) {
@@ -332,21 +332,16 @@ function toast(msg, kind) {
   }, 3400);
 }
 
-/* --- session --- */
-function token() { return sessionStorage.getItem(TOKEN_KEY); }
-function setSession(tok) { sessionStorage.setItem(TOKEN_KEY, tok); }
-function clearSession() { sessionStorage.removeItem(TOKEN_KEY); }
-
+/* --- session (HttpOnly cookie set at login; JS never touches the token) --- */
 async function api(path, options) {
   const opts = options || {};
-  opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token() });
+  opts.headers = Object.assign({}, opts.headers);
   if (opts.body && typeof opts.body !== "string") {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(opts.body);
   }
   const resp = await fetch(path, opts);
   if (resp.status === 401) {
-    clearSession();
     showLogin("Session expired — please sign in again.");
     throw new Error("unauthorized");
   }
@@ -843,7 +838,6 @@ $("login-form").addEventListener("submit", async (ev) => {
       $("login-error").textContent = data.detail || "Sign-in failed.";
       return;
     }
-    setSession(data.token);
     showApp();
   } catch (e) {
     $("login-error").textContent = "Network error — is the API reachable?";
@@ -851,7 +845,10 @@ $("login-form").addEventListener("submit", async (ev) => {
     $("login-btn").disabled = false;
   }
 });
-$("logout-btn").addEventListener("click", () => { clearSession(); showLogin(""); });
+$("logout-btn").addEventListener("click", async () => {
+  try { await fetch("/admin/v1/logout", { method: "POST" }); } catch (e) { /* best effort */ }
+  showLogin("");
+});
 $("nav-overview").addEventListener("click", () => switchTab("overview"));
 $("nav-users").addEventListener("click", () => switchTab("users"));
 $("refresh-overview").addEventListener("click", loadOverview);
@@ -889,7 +886,17 @@ $("page-next").addEventListener("click", () => { usersState.page += 1; loadUsers
   }
 })();
 
-if (token()) { showApp(); } else { showLogin(""); }
+/* boot: probe the session cookie — signed-in admins land straight on the app */
+async function boot() {
+  try {
+    const resp = await fetch("/admin/v1/session");
+    if (resp.ok) { showApp(); return; }
+    showLogin(resp.status === 503 ? "Admin dashboard is not configured on this server." : "");
+  } catch (e) {
+    showLogin("API unreachable — is the server running?");
+  }
+}
+boot();
 </script>
 </body>
 </html>
