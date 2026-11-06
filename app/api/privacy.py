@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 
-_CONTACT_EMAIL = "elsanal1995@gmail.com"
+_CONTACT_EMAIL = "contact@neobytech.net"
 
 _HTML = """<!DOCTYPE html>
 <html lang="fr">

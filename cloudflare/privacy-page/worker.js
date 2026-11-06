@@ -91,7 +91,7 @@ mêmes obligations.</p>
 supprimer votre compte directement dans l'Application (voir section 6), ou
 demander à tout moment la consultation ou la <strong>suppression définitive
 de vos données</strong> en écrivant à
-<a href="mailto:elsanal1995@gmail.com">elsanal1995@gmail.com</a> ; la suppression est alors effectuée
+<a href="mailto:contact@neobytech.net">contact@neobytech.net</a> ; la suppression est alors effectuée
 sous 30 jours.</p>
 
 <h2>6. Suppression du compte</h2>
@@ -122,7 +122,7 @@ en tête de page. Toute modification substantielle sera signalée dans
 l'Application.</p>
 
 <h2>10. Contact</h2>
-<p>Éditeur : NeoBytech — elsanal1995@gmail.com</p>
+<p>Éditeur : NeoBytech — contact@neobytech.net</p>
 
 <footer>Kora Bourse — NeoBytech. Les contenus générés par l'assistant IA sont
 informatifs et ne constituent pas un conseil en investissement.</footer>

@@ -199,7 +199,7 @@ class _ChatHint extends ConsumerWidget {
                 size: 56, color: Theme.of(context).colorScheme.primary),
             const SizedBox(height: 12),
             Text(
-              'Posez vos questions à Kora : cotations, analyses, conseils…',
+              'Posez vos questions à Kora : cotations, analyses, suggestions…',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyLarge,
             ),

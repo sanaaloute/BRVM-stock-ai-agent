@@ -24,7 +24,7 @@ class AppConfig {
   static const String designerName = 'NeoByte Technology';
 
   /// Contact support (repris dans les conditions générales).
-  static const String contactEmail = 'elsanal1995@gmail.com';
+  static const String contactEmail = 'contact@neobytech.net';
 
   /// Numéro WhatsApp du support au format international sans « + »
   /// (lien wa.me).
